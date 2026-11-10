@@ -1,3 +1,4 @@
+import json
 from typing import Annotated
 from uuid import UUID
 
@@ -5,12 +6,17 @@ from fastapi import FastAPI, Query
 
 from miniapm.config import Settings
 from miniapm.models import ServiceContext, ServiceName, TimeWindow
+from miniapm.prometheus_backend import PrometheusBackend
 
 DATASET_ID = UUID("018f2f70-0000-7000-8000-000000000001")
 SERVICE_CATALOG = {
     "order": (("order-1",), ("v1",), ("inventory",)),
     "inventory": (("inventory-1",), ("v1",), ()),
 }
+
+
+class MetricsQuery(TimeWindow):
+    service: ServiceName
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -36,5 +42,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             versions=versions,
             dependencies=dependencies,
         )
+
+    @app.get("/api/v1/metrics/query")
+    def metrics_query(
+        query: Annotated[MetricsQuery, Query()],
+    ) -> dict:
+        result = PrometheusBackend(settings.prometheus_url).query_metrics(
+            query.service, query.start, query.end
+        )
+        return json.loads(result)
 
     return app

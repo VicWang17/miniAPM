@@ -8,6 +8,7 @@ class Settings:
     environment: str = "local"
     host: str = "127.0.0.1"
     port: int = 8000
+    prometheus_url: str = "http://127.0.0.1:9090"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -16,4 +17,5 @@ class Settings:
             environment=os.getenv("MINIAPM_ENVIRONMENT", "local"),
             host=os.getenv("MINIAPM_HOST", "127.0.0.1"),
             port=int(os.getenv("MINIAPM_PORT", "8000")),
+            prometheus_url=os.getenv("PROMETHEUS_URL", "http://127.0.0.1:9090"),
         )
