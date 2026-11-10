@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.162.2",
     "langchain-openai>=1.7.4",
     "langgraph>=1.2.20",
+    "pyarrow>=26.0.1",
     "uvicorn>=0.54.0",
 ]
 
