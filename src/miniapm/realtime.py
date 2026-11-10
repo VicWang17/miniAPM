@@ -6,7 +6,7 @@ from pydantic import Field
 
 from miniapm.generation import RequestEvents, RequestParameters, generate_request
 from miniapm.models import ContractModel, ServiceName
-from miniapm.topology import Topology, build_request_plan
+from miniapm.topology import Topology, RequestPlan, build_request_plan
 
 
 class RealtimeSettings(ContractModel):
@@ -26,6 +26,10 @@ class ResourceSample(ContractModel):
 
 
 class RealtimePublisher(Protocol):
+    async def request_started(self, plan: RequestPlan) -> None: ...
+
+    async def request_finished(self, events: RequestEvents) -> None: ...
+
     async def publish_request(self, events: RequestEvents) -> None: ...
 
     async def publish_resource(self, sample: ResourceSample) -> None: ...
@@ -36,6 +40,12 @@ class RecordingPublisher:
         self.request_capacity = request_capacity
         self.requests: list[RequestEvents] = []
         self.resources: list[ResourceSample] = []
+
+    async def request_started(self, plan: RequestPlan) -> None:
+        return None
+
+    async def request_finished(self, events: RequestEvents) -> None:
+        return None
 
     async def publish_request(self, events: RequestEvents) -> None:
         if len(self.requests) >= self.request_capacity:
@@ -89,18 +99,22 @@ async def run_realtime(
             plan = build_request_plan(topology, request_number, request_started_at)
             parameters = parameters_for_request(request_number)
             events, _ = generate_request(plan, parameters)
+            await publisher.request_started(plan)
             inventory = plan.spans[2]
             is_slow = parameters.inventory_duration_seconds > 0.08
-            await publisher.publish_resource(
-                ResourceSample(
-                    event_time=request_started_at,
-                    service="inventory",
-                    instance=inventory.instance,
-                    version=inventory.version,
-                    value=85 if is_slow else 20,
+            try:
+                await publisher.publish_resource(
+                    ResourceSample(
+                        event_time=request_started_at,
+                        service="inventory",
+                        instance=inventory.instance,
+                        version=inventory.version,
+                        value=85 if is_slow else 20,
+                    )
                 )
-            )
-            await asyncio.sleep(events.request.duration_seconds)
+                await asyncio.sleep(events.request.duration_seconds)
+            finally:
+                await publisher.request_finished(events)
             finished_at = datetime.now(UTC)
             await publisher.publish_request(_at_ingestion(events, finished_at))
             await publisher.publish_resource(
