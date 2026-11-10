@@ -3,3 +3,15 @@
 /learning-progress.md
 /learningprocess.md
 /Learningprocess.md
+
+# Python
+/.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+
+# Generated telemetry and reports
+/data/generated/
+/reports/

@@ -1,0 +1,15 @@
+[project]
+name = "miniapm"
+version = "0.1.0"
+description = "A minimal APM investigation project"
+requires-python = "==3.13.*"
+dependencies = [
+    "fastapi>=0.162.2",
+    "langchain-openai>=1.7.4",
+    "langgraph>=1.2.20",
+    "uvicorn>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.4,<0.11"]
+build-backend = "uv_build"
