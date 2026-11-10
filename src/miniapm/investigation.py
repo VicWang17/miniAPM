@@ -15,9 +15,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
+from miniapm.backends import FixtureBackend, TelemetryBackend
 from miniapm.models import ServiceName, TimeWindow, ToolResult
-from miniapm.reports import EndReason, InvestigationReport, build_report
-from miniapm.tools import query_logs, query_metrics, query_traces
+from miniapm.reports import EndReason, build_report
+from miniapm.tools import create_tools
 
 SYSTEM_PROMPT = """You are an APM investigation agent.
 Choose tools and their structured arguments based on the user's target and current evidence.
@@ -27,9 +28,6 @@ Do not claim a root cause without supporting evidence. Finish when the available
 Do not request arbitrary SQL, shell commands, or unbounded data.
 If a tool returns an error, correct the arguments or choose another tool within the budget.
 """
-
-TOOLS = (query_metrics, query_traces, query_logs)
-TOOL_MAP = {tool.name: tool for tool in TOOLS}
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,11 +105,14 @@ def create_investigation_agent(
     model: BaseChatModel | None = None,
     budget: InvestigationBudget | None = None,
     window: TimeWindow | None = None,
+    backend: TelemetryBackend | None = None,
 ) -> CompiledStateGraph:
     if window is None:
         raise ValueError("window is required")
     budget = budget or InvestigationBudget()
-    chat_model = (model or build_chat_model()).bind_tools(list(TOOLS))
+    tools = create_tools(backend or FixtureBackend())
+    tool_map = {tool.name: tool for tool in tools}
+    chat_model = (model or build_chat_model()).bind_tools(list(tools))
     semaphore = asyncio.Semaphore(budget.tool_concurrency)
 
     def stop_reason(state: InvestigationState) -> EndReason | None:
@@ -142,7 +143,7 @@ def create_investigation_agent(
     async def execute_call(call: dict, deadline: float) -> ToolMessage:
         call_id = call.get("id") or uuid4().hex
         name = call.get("name", "unknown")
-        tool = TOOL_MAP.get(name)
+        tool = tool_map.get(name)
         if tool is None:
             content = _error_result(window, f"unknown tool was not executed: {name}")
             return ToolMessage(content=content, tool_call_id=call_id, name=name, status="error")
@@ -205,11 +206,12 @@ def create_investigation_agent(
     def finalize(state: InvestigationState) -> dict:
         reason = state["end_reason"] or "completed"
         answer = ""
-        for message in reversed(state["messages"]):
-            if isinstance(message, AIMessage) and message.content:
-                answer = _message_text(message)
-                break
-        if not answer and reason != "completed":
+        if reason == "completed":
+            for message in reversed(state["messages"]):
+                if isinstance(message, AIMessage) and message.content:
+                    answer = _message_text(message)
+                    break
+        else:
             answer = f"调查因 {reason} 终止；未强行推断根因，请查看已保存的证据。"
         return {"end_reason": reason, "final_answer": answer}
 
@@ -242,10 +244,11 @@ async def arun_investigation(
     end: datetime,
     model: BaseChatModel | None = None,
     budget: InvestigationBudget | None = None,
+    backend: TelemetryBackend | None = None,
 ) -> dict:
     budget = budget or InvestigationBudget()
     window = TimeWindow(start=start, end=end)
-    agent = create_investigation_agent(model, budget, window)
+    agent = create_investigation_agent(model, budget, window, backend)
     target = (
         f"{question}\n"
         f"Target service: {service}\n"
@@ -284,5 +287,8 @@ def run_investigation(
     end: datetime,
     model: BaseChatModel | None = None,
     budget: InvestigationBudget | None = None,
+    backend: TelemetryBackend | None = None,
 ) -> dict:
-    return asyncio.run(arun_investigation(question, service, start, end, model, budget))
+    return asyncio.run(
+        arun_investigation(question, service, start, end, model, budget, backend)
+    )
