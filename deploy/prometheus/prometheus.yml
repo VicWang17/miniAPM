@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: miniapm-simulator
+    honor_labels: true
+    static_configs:
+      - targets:
+          - host.docker.internal:8766
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: scrape_target
