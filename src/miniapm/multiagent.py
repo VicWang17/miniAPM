@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from miniapm.analysis import analyze_resource_changes
 from miniapm.backends import TelemetryBackend
+from miniapm.intake_backend import IntakeBackend
 from miniapm.investigation import (
     InvestigationBudget,
     SharedInvestigationBudget,
@@ -21,8 +22,8 @@ from miniapm.tools import ResourceQueryInput
 
 SUPERVISOR_PROMPT = """You are the lead APM investigator.
 Maintain the investigation goal and competing explanations.
-Call telemetry_investigation for metrics, logs and traces, or resource_change_investigation for deployments and resource evidence only when needed.
-Do not call both by default and do not follow a fixed sequence.
+Call telemetry_investigation for metrics, logs and traces, resource_change_investigation for deployments and resource evidence, or intake_investigation for RabbitMQ backlog, acknowledgements and ingestion delay only when needed.
+Do not call all subagents by default and do not follow a fixed sequence. Do not invoke intake_investigation for unrelated business questions unless platform lag is a relevant competing explanation.
 Use returned evidence to decide follow-up queries or finish.
 Subagents return bounded summaries, not ground truth. State missing evidence and contradictions explicitly.
 Produce the final answer yourself with evidence-based conclusions and limitations.
@@ -39,6 +40,12 @@ RESOURCE_CHANGE_PROMPT = """You are the resource and deployment investigation su
 Check deployments and available resource evidence for the exact dataset, service and time window.
 A deployment is only a clue, never proof of causality. Correlate timing and entity, and actively report contradictory evidence.
 If resource data is unavailable, state partial coverage instead of guessing. Return a concise summary of evidence and unresolved questions.
+"""
+
+INTAKE_PROMPT = """You are the telemetry intake investigation subagent.
+Query only RabbitMQ ready/unacked depth, consumer receive/acknowledge rates, ClickHouse write latency and ingestion delay for the assigned window.
+Use platform metrics to identify backlog or stale observable data. Any ready value above zero is a current backlog, even when unacked is zero; do not deny that backlog while noting that its trend is unknown.
+Never infer a business root cause from queue depth alone. Empty or old consumer samples mean missing evidence, not zero traffic. Return a bounded summary with actual values and limitations.
 """
 
 
@@ -100,6 +107,7 @@ def _subagent_runs(messages: list) -> list[SubagentRun]:
         if not isinstance(message, ToolMessage) or message.name not in {
             "telemetry_investigation",
             "resource_change_investigation",
+            "intake_investigation",
         }:
             continue
         content = json.loads(message.content)
@@ -143,6 +151,7 @@ def create_multiagent_investigation(
     deployment_context,
     resource_backend=None,
     shared_budget: SharedInvestigationBudget | None = None,
+    intake_backend: IntakeBackend | None = None,
 ) -> CompiledStateGraph:
     shared_budget = shared_budget or SharedInvestigationBudget()
     deadline = shared_budget.deadline
@@ -177,6 +186,22 @@ def create_multiagent_investigation(
         tools_override=(query_resource_changes,),
         system_prompt=RESOURCE_CHANGE_PROMPT,
     )
+    intake_backend = intake_backend or IntakeBackend()
+
+    @tool
+    def query_intake(start: datetime, end: datetime) -> str:
+        """Query RabbitMQ depth, consumer rates, write latency and ingestion delay."""
+        return intake_backend.query_intake(start, end)
+
+    intake_agent = create_investigation_agent(
+        model,
+        InvestigationBudget(max_tool_calls=2),
+        window,
+        backend,
+        shared_budget=shared_budget,
+        tools_override=(query_intake,),
+        system_prompt=INTAKE_PROMPT,
+    )
     return create_investigation_agent(
         model,
         InvestigationBudget(),
@@ -186,6 +211,7 @@ def create_multiagent_investigation(
         tools_override=(
             _as_tool("telemetry_investigation", telemetry_agent, deadline),
             _as_tool("resource_change_investigation", resource_agent, deadline),
+            _as_tool("intake_investigation", intake_agent, deadline),
         ),
         system_prompt=SUPERVISOR_PROMPT,
     )
