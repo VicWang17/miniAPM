@@ -106,11 +106,13 @@ def create_investigation_agent(
     budget: InvestigationBudget | None = None,
     window: TimeWindow | None = None,
     backend: TelemetryBackend | None = None,
+    deployment_context=None,
+    resource_backend=None,
 ) -> CompiledStateGraph:
     if window is None:
         raise ValueError("window is required")
     budget = budget or InvestigationBudget()
-    tools = create_tools(backend or FixtureBackend())
+    tools = create_tools(backend or FixtureBackend(), deployment_context, resource_backend)
     tool_map = {tool.name: tool for tool in tools}
     chat_model = (model or build_chat_model()).bind_tools(list(tools))
     semaphore = asyncio.Semaphore(budget.tool_concurrency)
@@ -245,10 +247,14 @@ async def arun_investigation(
     model: BaseChatModel | None = None,
     budget: InvestigationBudget | None = None,
     backend: TelemetryBackend | None = None,
+    deployment_context=None,
+    resource_backend=None,
 ) -> dict:
     budget = budget or InvestigationBudget()
     window = TimeWindow(start=start, end=end)
-    agent = create_investigation_agent(model, budget, window, backend)
+    agent = create_investigation_agent(
+        model, budget, window, backend, deployment_context, resource_backend
+    )
     target = (
         f"{question}\n"
         f"Target service: {service}\n"
@@ -288,7 +294,19 @@ def run_investigation(
     model: BaseChatModel | None = None,
     budget: InvestigationBudget | None = None,
     backend: TelemetryBackend | None = None,
+    deployment_context=None,
+    resource_backend=None,
 ) -> dict:
     return asyncio.run(
-        arun_investigation(question, service, start, end, model, budget, backend)
+        arun_investigation(
+            question,
+            service,
+            start,
+            end,
+            model,
+            budget,
+            backend,
+            deployment_context,
+            resource_backend,
+        )
     )
