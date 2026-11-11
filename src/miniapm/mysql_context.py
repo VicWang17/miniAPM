@@ -208,6 +208,81 @@ class MySQLContext:
         self.connection.commit()
         return count
 
+    def create_alert_investigation(
+        self,
+        investigation_id: str,
+        dataset_id: str,
+        question: str,
+        service: str,
+        window: TimeWindow,
+        event_key: str,
+        fingerprint: str,
+        started_at: datetime,
+        labels: dict,
+    ) -> None:
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO investigations
+                        (id, dataset_id, question, service, window_start, window_end, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'queued')
+                    """,
+                    (
+                        investigation_id,
+                        dataset_id,
+                        question,
+                        service,
+                        self._mysql_time(window.start),
+                        self._mysql_time(window.end),
+                    ),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO alerts
+                        (event_key, fingerprint, started_at, status, labels_json, investigation_id)
+                    VALUES (%s, %s, %s, 'firing', %s, %s)
+                    """,
+                    (
+                        event_key,
+                        fingerprint,
+                        self._mysql_time(started_at),
+                        json.dumps(labels),
+                        investigation_id,
+                    ),
+                )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
+    def alert(self, event_key: str) -> dict | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT event_key, status, investigation_id FROM alerts WHERE event_key=%s",
+                (event_key,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return {"event_key": row[0], "status": row[1], "investigation_id": row[2]}
+
+    def explain_deployments(
+        self, dataset_id: str, service: str, start: datetime, end: datetime
+    ) -> dict:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                EXPLAIN SELECT version, deployed_at, summary FROM deployments
+                WHERE dataset_id=%s AND service=%s AND deployed_at >= %s AND deployed_at < %s
+                ORDER BY deployed_at
+                """,
+                (dataset_id, service, self._mysql_time(start), self._mysql_time(end)),
+            )
+            row = cursor.fetchone()
+            columns = [item[0] for item in cursor.description]
+        return dict(zip(columns, row))
+
     def investigation(self, investigation_id: str) -> dict | None:
         with self.connection.cursor() as cursor:
             cursor.execute(
