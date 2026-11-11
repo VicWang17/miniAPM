@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 
 import pymysql
 
-from miniapm.models import ContractModel
+from miniapm.models import ContractModel, TimeWindow
+from miniapm.reports import InvestigationReport
 from miniapm.topology import Topology
 
 
@@ -120,3 +121,69 @@ class MySQLContext:
             {"version": version, "deployed_at": deployed_at.isoformat(), "summary": summary}
             for version, deployed_at, summary in rows
         ]
+
+    def create_investigation(
+        self,
+        investigation_id: str,
+        dataset_id: str,
+        question: str,
+        service: str,
+        window: TimeWindow,
+    ) -> None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO investigations
+                    (id, dataset_id, question, service, window_start, window_end, status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'running')
+                """,
+                (
+                    investigation_id,
+                    dataset_id,
+                    question,
+                    service,
+                    self._mysql_time(window.start),
+                    self._mysql_time(window.end),
+                ),
+            )
+        self.connection.commit()
+
+    def complete_investigation(
+        self,
+        report: InvestigationReport,
+        max_report_bytes: int = 100_000,
+    ) -> None:
+        document = report.model_dump_json()
+        if len(document.encode("utf-8")) > max_report_bytes:
+            raise ValueError("report_json exceeds the configured size limit")
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE investigations
+                SET status='completed', report_json=%s, finished_at=%s, error_reason=NULL
+                WHERE id=%s
+                """,
+                (document, self._mysql_time(datetime.now(UTC)), str(report.investigation_id)),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("investigation not found")
+        self.connection.commit()
+
+    def investigation(self, investigation_id: str) -> dict | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, dataset_id, question, service, status, error_reason, report_json FROM investigations WHERE id=%s",
+                (investigation_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "dataset_id": row[1],
+            "question": row[2],
+            "service": row[3],
+            "status": row[4],
+            "error_reason": row[5],
+            "report_json": json.loads(row[6]) if row[6] else None,
+        }
