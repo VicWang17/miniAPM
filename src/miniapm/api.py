@@ -8,7 +8,8 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from miniapm.alerts import AlertmanagerNotification, resolve_alert
-from miniapm.analysis import GroupDimension, analyze_groups, analyze_resource_changes, analyze_traces, compare_windows
+from miniapm.analysis import GroupDimension, analyze_groups, analyze_resource_changes, analyze_traces, compare_with_baseline, compare_windows
+from miniapm.baseline import BaselineClickHouseBackend
 from miniapm.clickhouse_backend import ClickHouseBackend
 from miniapm.config import Settings
 from miniapm.models import ContractModel, ServiceContext, ServiceName, TimeWindow
@@ -47,6 +48,16 @@ class WindowCompareQuery(ContractModel):
     current_end: datetime
     previous_start: datetime
     previous_end: datetime
+
+
+class BaselineCompareQuery(ContractModel):
+    dataset_id: UUID
+    service: ServiceName
+    route: str = "POST /orders"
+    current_start: datetime
+    current_end: datetime
+    baseline_start_date: str
+    baseline_end_date: str
 
 
 class InvestigationRequest(BaseModel):
@@ -144,6 +155,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         finally:
             backend.close()
+
+    @app.get("/api/v1/analysis/baseline")
+    def analysis_baseline(query: Annotated[BaselineCompareQuery, Query()]) -> dict:
+        backend = ClickHouseBackend(dataset_id=str(query.dataset_id))
+        baseline_backend = BaselineClickHouseBackend()
+        try:
+            return json.loads(
+                compare_with_baseline(
+                    backend,
+                    baseline_backend,
+                    str(query.dataset_id),
+                    query.service,
+                    query.route,
+                    TimeWindow(start=query.current_start, end=query.current_end),
+                    query.baseline_start_date,
+                    query.baseline_end_date,
+                )
+            )
+        finally:
+            backend.close()
+            baseline_backend.close()
 
     @app.get("/api/v1/analysis/resource-changes")
     def analysis_resource_changes(query: Annotated[AnalysisQuery, Query()]) -> dict:

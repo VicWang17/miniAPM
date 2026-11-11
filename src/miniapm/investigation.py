@@ -16,14 +16,15 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
 from miniapm.backends import FixtureBackend, TelemetryBackend
+from miniapm.baseline import BaselineClickHouseBackend
 from miniapm.models import ServiceName, TimeWindow, ToolResult
 from miniapm.reports import EndReason, build_report
 from miniapm.tools import create_tools
 
 SYSTEM_PROMPT = """You are an APM investigation agent.
 Choose tools and their structured arguments based on the user's target and current evidence.
-Tool results are fixed fixtures, not live service data. Treat empty results as missing evidence.
-Use exact UTC windows and identifiers returned by earlier tools when follow-up queries need them.
+Check each tool result's source_name and warnings to distinguish fixtures from live backends. Treat empty results as missing evidence.
+Use exact UTC windows and identifiers returned by earlier tools when follow-up queries need them. Pass the target Dataset ID verbatim to dataset_id arguments; never use a service name or invent a zero UUID.
 Do not claim a root cause without supporting evidence. Finish when the available evidence is sufficient.
 Do not request arbitrary SQL, shell commands, or unbounded data.
 If a tool returns an error, correct the arguments or choose another tool within the budget.
@@ -131,8 +132,13 @@ def create_investigation_agent(
     if window is None:
         raise ValueError("window is required")
     budget = budget or InvestigationBudget()
+    baseline_backend = (
+        BaselineClickHouseBackend()
+        if tools_override is None and backend is not None and hasattr(backend, "window_metrics")
+        else None
+    )
     tools = tools_override or create_tools(
-        backend or FixtureBackend(), deployment_context, resource_backend
+        backend or FixtureBackend(), deployment_context, resource_backend, baseline_backend
     )
     tool_map = {tool.name: tool for tool in tools}
     chat_model = (model or build_chat_model()).bind_tools(list(tools))

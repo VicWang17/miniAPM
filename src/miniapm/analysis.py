@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Protocol
 
 from miniapm.models import TimeWindow, ToolResult
@@ -71,6 +71,53 @@ def compare_windows(
             "previous_window": previous.model_dump(mode="json"),
         },
         warnings=[] if has_data else ["one comparison window has no requests"],
+    ).model_dump_json()
+
+
+def compare_with_baseline(
+    backend: WindowBackend,
+    baseline_backend,
+    dataset_id: str,
+    service: str,
+    route: str,
+    current: TimeWindow,
+    baseline_start_date: str,
+    baseline_end_date: str,
+    minimum_samples: int = 5,
+) -> str:
+    current_metrics = backend.window_metrics(service, current.start, current.end)
+    baseline = baseline_backend.query_baseline(
+        dataset_id, service, route, baseline_start_date, baseline_end_date
+    )
+    warnings = []
+    comparable = baseline is not None
+    if baseline is None:
+        warnings.append("no matching historical baseline")
+    elif baseline["sample_count"] < minimum_samples:
+        comparable = False
+        warnings.append("historical baseline has insufficient samples")
+    else:
+        current_end_inclusive = (current.end - timedelta(microseconds=1)).date().isoformat()
+        if current.start.date().isoformat() <= baseline_end_date and current_end_inclusive >= baseline_start_date:
+            comparable = False
+            warnings.append("current window overlaps historical baseline")
+    delta = {}
+    for key in ("request_count", "error_count", "avg_seconds", "p95_seconds"):
+        delta[key] = current_metrics[key] - baseline[key] if comparable else None
+    return ToolResult[object](
+        status="ok" if comparable else "partial",
+        window=current,
+        source_kind="simulated",
+        source_name="clickhouse_hive_baseline",
+        data={
+            "current": current_metrics,
+            "baseline": baseline,
+            "delta": delta,
+            "comparable": comparable,
+            "route": route,
+            "quantile_method": "nearest-rank ceil(0.95*n)",
+        },
+        warnings=warnings,
     ).model_dump_json()
 
 

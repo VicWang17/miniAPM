@@ -10,6 +10,7 @@ from miniapm.analysis import (
     analyze_groups,
     analyze_resource_changes,
     analyze_traces,
+    compare_with_baseline,
     compare_windows,
 )
 from miniapm.backends import TelemetryBackend
@@ -53,10 +54,23 @@ class ResourceQueryInput(QueryInput):
     dataset_id: str
 
 
+class BaselineCompareInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dataset_id: str
+    service: Literal["order", "inventory"]
+    route: str = "POST /orders"
+    current_start: datetime
+    current_end: datetime
+    baseline_start_date: str
+    baseline_end_date: str
+
+
 def create_tools(
     backend: TelemetryBackend,
     deployment_context=None,
     resource_backend: ResourceBackend | None = None,
+    baseline_backend=None,
 ):
     @tool(args_schema=QueryInput)
     def query_metrics(service: str, start: datetime, end: datetime) -> str:
@@ -109,6 +123,30 @@ def create_tools(
             )
 
         tools.extend([analyze_grouped_requests, compare_time_windows])
+    if baseline_backend is not None:
+        @tool(args_schema=BaselineCompareInput)
+        def compare_historical_baseline(
+            dataset_id: str,
+            service: Literal["order", "inventory"],
+            current_start: datetime,
+            current_end: datetime,
+            baseline_start_date: str,
+            baseline_end_date: str,
+            route: str = "POST /orders",
+        ) -> str:
+            """Compare the current window with a real Hive historical baseline."""
+            return compare_with_baseline(
+                backend,
+                baseline_backend,
+                dataset_id,
+                service,
+                route,
+                TimeWindow(start=current_start, end=current_end),
+                baseline_start_date,
+                baseline_end_date,
+            )
+
+        tools.append(compare_historical_baseline)
     if deployment_context is not None:
         @tool(args_schema=ResourceQueryInput)
         def query_resource_changes(
