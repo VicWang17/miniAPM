@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from miniapm.alerts import AlertmanagerNotification, resolve_alert
 from miniapm.analysis import GroupDimension, analyze_groups, analyze_resource_changes, analyze_traces, compare_with_baseline, compare_windows
-from miniapm.baseline import BaselineClickHouseBackend
+from miniapm.baseline_cache import CachedBaselineBackend
 from miniapm.clickhouse_backend import ClickHouseBackend
 from miniapm.config import Settings
 from miniapm.models import ContractModel, ServiceContext, ServiceName, TimeWindow
@@ -159,7 +159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/analysis/baseline")
     def analysis_baseline(query: Annotated[BaselineCompareQuery, Query()]) -> dict:
         backend = ClickHouseBackend(dataset_id=str(query.dataset_id))
-        baseline_backend = BaselineClickHouseBackend()
+        baseline_backend = CachedBaselineBackend()
         try:
             return json.loads(
                 compare_with_baseline(

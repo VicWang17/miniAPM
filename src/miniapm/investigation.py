@@ -16,7 +16,7 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
 from miniapm.backends import FixtureBackend, TelemetryBackend
-from miniapm.baseline import BaselineClickHouseBackend
+from miniapm.baseline_cache import CachedBaselineBackend
 from miniapm.models import ServiceName, TimeWindow, ToolResult
 from miniapm.reports import EndReason, build_report
 from miniapm.tools import create_tools
@@ -133,7 +133,7 @@ def create_investigation_agent(
         raise ValueError("window is required")
     budget = budget or InvestigationBudget()
     baseline_backend = (
-        BaselineClickHouseBackend()
+        CachedBaselineBackend()
         if tools_override is None and backend is not None and hasattr(backend, "window_metrics")
         else None
     )

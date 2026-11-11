@@ -90,6 +90,8 @@ def compare_with_baseline(
         dataset_id, service, route, baseline_start_date, baseline_end_date
     )
     warnings = []
+    if baseline and baseline.get("cache_status") == "fallback_after_error":
+        warnings.append("Redis unavailable; baseline read from ClickHouse")
     comparable = baseline is not None
     if baseline is None:
         warnings.append("no matching historical baseline")

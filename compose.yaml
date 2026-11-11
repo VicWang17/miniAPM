@@ -79,6 +79,11 @@ services:
     volumes:
       - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql-data:/var/lib/mysql
+  redis:
+    image: redis:7.4.1
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6380:6379"
   rabbitmq:
     image: rabbitmq:4.1-management
     environment:
