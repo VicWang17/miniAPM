@@ -1,0 +1,146 @@
+rule_files:
+  - /etc/prometheus/miniapm-slo-rules.yml
+
+tests:
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders"}'
+        values: '0+10x24000'
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",status="error"}'
+        values: '0+2x24000'
+    alert_rule_test:
+      - eval_time: 1h2m
+        alertname: MiniapmAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels: {dataset_id: 018f2f70-0000-7000-8000-000000000606, policy: experiment, strategy: fast_burn, service: order, window: 1h}
+            exp_annotations: {summary: "SLO fast_burn for order POST /orders"}
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts:
+          - exp_labels: {dataset_id: 018f2f70-0000-7000-8000-000000000606, policy: experiment, strategy: slow_burn, service: order, window: 6h}
+            exp_annotations: {summary: "SLO slow_burn for order POST /orders"}
+    promql_expr_test:
+      - eval_time: 1h2m
+        expr: (miniapm:order_error_burn_rate:1h > 14.4) and on (dataset_id, service) (miniapm:order_error_burn_rate:5m > 14.4)
+        exp_samples:
+          - labels: '{__name__="miniapm:order_error_burn_rate:1h",dataset_id="018f2f70-0000-7000-8000-000000000606",service="order",window="1h"}'
+            value: 16.666666666666654
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders"}'
+        values: '0+10x24000'
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",status="error"}'
+        values: '0x24000'
+    alert_rule_test:
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders"}'
+        values: '0+10x24000'
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",status="error"}'
+        values: '0x240 40x60 2440x21600'
+    alert_rule_test:
+      - eval_time: 1h15m
+        alertname: MiniapmAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders"}'
+        values: '0+0.0125x24000'
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",status="error"}'
+        values: '0+0.0125x24000'
+    alert_rule_test:
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_in_flight{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",instance="order-1",version="v1"}'
+        values: '2x480 4x20'
+    alert_rule_test:
+      - eval_time: 2h2m
+        alertname: MiniapmInFlightSigma
+        exp_alerts:
+          - exp_labels: {dataset_id: 018f2f70-0000-7000-8000-000000000606, environment: local, instance: order-1, policy: experiment, route: POST /orders, service: order, source_kind: simulated, strategy: gauge_3sigma, version: v1}
+            exp_annotations: {summary: "In-flight requests exceed historical mean plus 3 sigma"}
+      - eval_time: 2h2m
+        alertname: MiniapmInFlightFixed
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_in_flight{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",instance="order-1",version="v1"}'
+        values: '2x60 3x60 2x60 3x60 2x60 3x60 2x60 3x60 3x20'
+    alert_rule_test:
+      - eval_time: 2h2m
+        alertname: MiniapmInFlightSigma
+        exp_alerts: []
+      - eval_time: 2h2m
+        alertname: MiniapmInFlightFixed
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_request_duration_seconds_bucket{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",le="0.5"}'
+        values: '0+9.5x100'
+      - series: 'miniapm_request_duration_seconds_bucket{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",le="+Inf"}'
+        values: '0+10x100'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MiniapmLatencySLO
+        exp_alerts:
+          - exp_labels: {dataset_id: 018f2f70-0000-7000-8000-000000000606, policy: experiment, service: order, strategy: latency_slo}
+            exp_annotations: {summary: "More than 1 percent of requests exceed 0.5 seconds"}
+      - eval_time: 10m
+        alertname: MiniapmLatencyP95Comparison
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders"}'
+        values: '0+10x24000'
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",status="error"}'
+        values: '0x240 0.5x4 2x21600'
+    alert_rule_test:
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilityFastBurn
+        exp_alerts: []
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts: []
+
+  - interval: 15s
+    input_series:
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders"}'
+        values: '0+10x24000'
+      - series: 'miniapm_requests_total{dataset_id="018f2f70-0000-7000-8000-000000000606",environment="local",source_kind="simulated",service="order",route="POST /orders",status="error"}'
+        values: '0+2x1440 2880x2400'
+    alert_rule_test:
+      - eval_time: 1h40m
+        alertname: MiniapmAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels: {dataset_id: 018f2f70-0000-7000-8000-000000000606, policy: experiment, strategy: fast_burn, service: order, window: 1h}
+            exp_annotations: {summary: "SLO fast_burn for order POST /orders"}
+      - eval_time: 6h2m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts:
+          - exp_labels: {dataset_id: 018f2f70-0000-7000-8000-000000000606, policy: experiment, strategy: slow_burn, service: order, window: 6h}
+            exp_annotations: {summary: "SLO slow_burn for order POST /orders"}
+      - eval_time: 6h40m
+        alertname: MiniapmAvailabilitySlowBurn
+        exp_alerts: []

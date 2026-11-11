@@ -1,0 +1,18 @@
+{
+  "dataset_id": "018f2f70-0000-7000-8000-000000000606",
+  "environment": "local",
+  "service": "order",
+  "route": "POST /orders",
+  "source_kind": "simulated",
+  "gauge_instance": "order-1",
+  "gauge_version": "v1",
+  "availability_target": 0.99,
+  "budget_hours": 720,
+  "fast_budget_fraction": 0.02,
+  "slow_budget_fraction": 0.05,
+  "minimum_qps": 0.1,
+  "latency_target_seconds": 0.5,
+  "latency_slow_fraction": 0.01,
+  "gauge_sigma": 3,
+  "gauge_fixed_threshold": 5
+}

@@ -117,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.investigations = manager
         app.state.adaptation = HeterogeneousPipeline(context, publisher)
+        app.state.experiment_notifications = []
         try:
             yield
         finally:
@@ -238,6 +239,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         finally:
             context.close()
+
+    @app.post("/api/v1/alerts/experiments", status_code=202)
+    async def experiment_alert(http_request: Request) -> dict:
+        notification = await http_request.json()
+        records = http_request.app.state.experiment_notifications
+        records.append(notification)
+        del records[:-100]
+        return {"accepted": len(notification.get("alerts", [])), "investigations_created": 0}
+
+    @app.get("/api/v1/alerts/experiments")
+    def experiment_notifications(http_request: Request) -> dict:
+        return {"notifications": http_request.app.state.experiment_notifications}
 
     @app.post("/api/v1/alerts/webhook", status_code=202)
     async def alert_webhook(http_request: Request, notification: AlertmanagerNotification) -> dict:

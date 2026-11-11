@@ -4,6 +4,7 @@ global:
 
 rule_files:
   - /etc/prometheus/miniapm-rules.yml
+  - /etc/prometheus/miniapm-slo-rules.yml
 
 alerting:
   alertmanagers:

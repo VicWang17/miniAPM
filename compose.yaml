@@ -45,6 +45,8 @@ services:
     volumes:
       - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus/miniapm-rules.yml:/etc/prometheus/miniapm-rules.yml:ro
+      - ./deploy/prometheus/miniapm-slo-rules.yml:/etc/prometheus/miniapm-slo-rules.yml:ro
+      - ./deploy/prometheus/miniapm-slo-rules-test.yml:/etc/prometheus/miniapm-slo-rules-test.yml:ro
       - prometheus-data:/prometheus
   grafana:
     image: grafana/grafana:12.1.0

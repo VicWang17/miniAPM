@@ -12,7 +12,7 @@ from miniapm.generation import RequestEvents
 from miniapm.realtime import ResourceSample
 from miniapm.topology import RequestPlan
 
-LABELS = ("service", "instance", "version", "route")
+LABELS = ("dataset_id", "environment", "source_kind", "service", "instance", "version", "route")
 
 
 class MetricsPublisher:
@@ -46,8 +46,11 @@ class MetricsPublisher:
             registry=self.registry,
         )
 
-    def _labels(self, service: str, instance: str, version: str, route: str) -> dict:
+    def _labels(self, event, service: str, instance: str, version: str, route: str) -> dict:
         return {
+            "dataset_id": str(event.dataset_id),
+            "environment": event.environment,
+            "source_kind": event.source_kind,
             "service": service,
             "instance": instance,
             "version": version,
@@ -56,13 +59,13 @@ class MetricsPublisher:
 
     async def request_started(self, plan: RequestPlan) -> None:
         for span in (plan.spans[0], plan.spans[2]):
-            labels = self._labels(span.service, span.instance, span.version, plan.route)
+            labels = self._labels(plan, span.service, span.instance, span.version, plan.route)
             self.requests_in_flight.labels(**labels).inc()
 
     async def request_finished(self, events: RequestEvents) -> None:
         request = events.request
         labels = self._labels(
-            request.service, request.instance, request.version, request.route
+            request, request.service, request.instance, request.version, request.route
         )
         self.requests_in_flight.labels(**labels).dec()
         counter_labels = {**labels, "status": request.status}
@@ -73,7 +76,7 @@ class MetricsPublisher:
 
         inventory = next(span for span in events.spans if span.kind == "server" and span.service == "inventory")
         inventory_labels = self._labels(
-            inventory.service, inventory.instance, inventory.version, inventory.route
+            inventory, inventory.service, inventory.instance, inventory.version, inventory.route
         )
         duration = (inventory.ended_at - inventory.started_at).total_seconds()
         self.requests_in_flight.labels(**inventory_labels).dec()
