@@ -39,6 +39,22 @@ class InvestigationBudget:
     tool_concurrency: int = 3
 
 
+@dataclass(slots=True)
+class SharedInvestigationBudget:
+    max_tool_calls: int = 12
+    timeout_seconds: float = 180
+    attempts: int = 0
+    deadline: float = 0
+
+    def __post_init__(self) -> None:
+        if not self.deadline:
+            self.deadline = time.monotonic() + self.timeout_seconds
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.max_tool_calls - self.attempts)
+
+
 class InvestigationState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     tool_attempts: int
@@ -108,11 +124,16 @@ def create_investigation_agent(
     backend: TelemetryBackend | None = None,
     deployment_context=None,
     resource_backend=None,
+    shared_budget: SharedInvestigationBudget | None = None,
+    tools_override=None,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> CompiledStateGraph:
     if window is None:
         raise ValueError("window is required")
     budget = budget or InvestigationBudget()
-    tools = create_tools(backend or FixtureBackend(), deployment_context, resource_backend)
+    tools = tools_override or create_tools(
+        backend or FixtureBackend(), deployment_context, resource_backend
+    )
     tool_map = {tool.name: tool for tool in tools}
     chat_model = (model or build_chat_model()).bind_tools(list(tools))
     semaphore = asyncio.Semaphore(budget.tool_concurrency)
@@ -120,7 +141,11 @@ def create_investigation_agent(
     def stop_reason(state: InvestigationState) -> EndReason | None:
         if time.monotonic() >= state["deadline"]:
             return "timeout"
+        if shared_budget and time.monotonic() >= shared_budget.deadline:
+            return "timeout"
         if state["tool_attempts"] >= budget.max_tool_calls:
+            return "tool_budget_exhausted"
+        if shared_budget and shared_budget.remaining == 0:
             return "tool_budget_exhausted"
         if state["no_progress_rounds"] >= budget.max_no_progress_rounds:
             return "repeated_no_progress"
@@ -133,7 +158,7 @@ def create_investigation_agent(
         remaining = state["deadline"] - time.monotonic()
         try:
             response = await asyncio.wait_for(
-                chat_model.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]),
+                chat_model.ainvoke([SystemMessage(content=system_prompt), *state["messages"]]),
                 timeout=remaining,
             )
         except TimeoutError:
@@ -172,8 +197,12 @@ def create_investigation_agent(
         last_message = state["messages"][-1]
         calls = last_message.tool_calls if isinstance(last_message, AIMessage) else []
         available = max(0, budget.max_tool_calls - state["tool_attempts"])
+        if shared_budget:
+            available = min(available, shared_budget.remaining)
         selected = calls[:available]
         dropped = calls[available:]
+        if shared_budget:
+            shared_budget.attempts += len(selected)
         messages = list(
             await asyncio.gather(*(execute_call(call, state["deadline"]) for call in selected))
         )
