@@ -16,6 +16,7 @@ async def main() -> None:
     parser.add_argument("--rate", type=float, default=5)
     parser.add_argument("--max-in-flight", type=int, default=100)
     parser.add_argument("--fault-mode", choices=["normal", "slow", "mixed"], default="mixed")
+    parser.add_argument("--experimental-trace-label", action="store_true")
     parser.add_argument(
         "--dataset-id",
         type=UUID,
@@ -23,7 +24,7 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
-    publisher = MetricsPublisher()
+    publisher = MetricsPublisher(experimental_trace_label=args.experimental_trace_label)
     server = uvicorn.Server(
         uvicorn.Config(
             create_metrics_app(publisher.registry),

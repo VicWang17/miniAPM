@@ -16,12 +16,20 @@ LABELS = ("service", "instance", "version", "route")
 
 
 class MetricsPublisher:
-    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: CollectorRegistry | None = None,
+        experimental_trace_label: bool = False,
+    ) -> None:
         self.registry = registry or CollectorRegistry()
+        self.experimental_trace_label = experimental_trace_label
+        counter_labels = (*LABELS, "status")
+        if experimental_trace_label:
+            counter_labels = (*counter_labels, "trace_id")
         self.requests_total = Counter(
             "miniapm_requests_total",
             "Completed simulated requests",
-            (*LABELS, "status"),
+            counter_labels,
             registry=self.registry,
         )
         self.requests_in_flight = Gauge(
@@ -57,7 +65,10 @@ class MetricsPublisher:
             request.service, request.instance, request.version, request.route
         )
         self.requests_in_flight.labels(**labels).dec()
-        self.requests_total.labels(**labels, status=request.status).inc()
+        counter_labels = {**labels, "status": request.status}
+        if self.experimental_trace_label:
+            counter_labels["trace_id"] = request.trace_id
+        self.requests_total.labels(**counter_labels).inc()
         self.request_duration.labels(**labels).observe(request.duration_seconds)
 
         inventory = next(span for span in events.spans if span.kind == "server" and span.service == "inventory")
@@ -66,7 +77,10 @@ class MetricsPublisher:
         )
         duration = (inventory.ended_at - inventory.started_at).total_seconds()
         self.requests_in_flight.labels(**inventory_labels).dec()
-        self.requests_total.labels(**inventory_labels, status=inventory.status).inc()
+        inventory_counter_labels = {**inventory_labels, "status": inventory.status}
+        if self.experimental_trace_label:
+            inventory_counter_labels["trace_id"] = request.trace_id
+        self.requests_total.labels(**inventory_counter_labels).inc()
         self.request_duration.labels(**inventory_labels).observe(duration)
 
     async def publish_request(self, events: RequestEvents) -> None:
