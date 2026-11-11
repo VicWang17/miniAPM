@@ -30,6 +30,8 @@ services:
       - "9000:9000"
     volumes:
       - ./deploy/clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
       - clickhouse-data:/var/lib/clickhouse
 
 volumes:
