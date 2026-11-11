@@ -7,10 +7,12 @@ from miniapm.models import TimeWindow, ToolResult
 
 class ClickHouseBackend:
     def __init__(
-        self, base_url: str = "http://127.0.0.1:8123", dataset_id: str | None = None
+        self, base_url: str = "http://127.0.0.1:8123", dataset_id: str | None = None,
+        source_kind: str = "simulated",
     ) -> None:
         self.client = httpx.Client(base_url=base_url, timeout=5, trust_env=False)
         self.dataset_id = dataset_id
+        self.source_kind = source_kind
 
     def _dataset_filter(self, parameters: dict) -> str:
         if self.dataset_id:
@@ -36,7 +38,7 @@ class ClickHouseBackend:
         return ToolResult[object](
             status="ok" if data else "empty",
             window=window,
-            source_kind="simulated",
+            source_kind=self.source_kind,
             source_name="clickhouse",
             data=data,
             warnings=["ClickHouse results are bounded query samples"],

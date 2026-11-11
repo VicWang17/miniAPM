@@ -13,7 +13,8 @@ from miniapm.models import LogEvent, SpanEvent
 
 def rabbitmq_url() -> str:
     password = quote(os.environ["RABBITMQ_PASSWORD"], safe="")
-    return f"amqp://miniapm:{password}@127.0.0.1:5672/%2F"
+    host = os.getenv("RABBITMQ_HOST", "127.0.0.1")
+    return f"amqp://miniapm:{password}@{host}:5672/%2F"
 
 
 class RabbitMQConsumer:

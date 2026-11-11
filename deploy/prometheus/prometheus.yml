@@ -19,6 +19,12 @@ scrape_configs:
     relabel_configs:
       - source_labels: [__address__]
         target_label: scrape_target
+  - job_name: miniapm-instrumented
+    honor_labels: true
+    static_configs:
+      - targets:
+          - instrumented-order:8080
+          - instrumented-inventory:8080
   - job_name: miniapm-rabbitmq
     static_configs:
       - targets: [rabbitmq:15692]

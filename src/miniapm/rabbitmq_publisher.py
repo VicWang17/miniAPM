@@ -9,7 +9,8 @@ class RabbitMQPublisher:
     def __init__(self, url: str | None = None) -> None:
         if url is None:
             password = os.environ["RABBITMQ_PASSWORD"]
-            url = f"amqp://miniapm:{quote(password, safe='')}@127.0.0.1:5672/%2F"
+            host = os.getenv("RABBITMQ_HOST", "127.0.0.1")
+            url = f"amqp://miniapm:{quote(password, safe='')}@{host}:5672/%2F"
         self.connection = pika.BlockingConnection(pika.URLParameters(url))
         self.channel = self.connection.channel()
         self.channel.confirm_delivery()
