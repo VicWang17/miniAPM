@@ -1,0 +1,38 @@
+groups:
+  - name: miniapm-service-alerts
+    rules:
+      - alert: MiniapmHighLatency
+        expr: >-
+          (
+            histogram_quantile(0.95, sum by (service, le) (rate(miniapm_request_duration_seconds_bucket[1m]))) > 0.5
+          ) and (
+            sum by (service) (rate(miniapm_requests_total[1m])) > 0.1
+          )
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained high P95 latency on {{ $labels.service }}"
+      - alert: MiniapmHighErrorRatio
+        expr: >-
+          (
+            sum by (service) (rate(miniapm_requests_total{status="error"}[1m]))
+            / sum by (service) (rate(miniapm_requests_total[1m])) > 0.05
+          ) and (
+            sum by (service) (rate(miniapm_requests_total[1m])) > 0.1
+          )
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sustained high error ratio on {{ $labels.service }}"
+  - name: miniapm-intake-alerts
+    rules:
+      - alert: MiniapmIntakeBacklog
+        expr: sum(rabbitmq_queue_messages_ready{queue=~"miniapm.logs|miniapm.spans"}) > 100
+        for: 30s
+        labels:
+          severity: warning
+          service: order
+        annotations:
+          summary: "RabbitMQ telemetry backlog exceeds 100 messages"
