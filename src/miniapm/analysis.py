@@ -61,7 +61,7 @@ def compare_windows(
     return ToolResult[object](
         status="ok" if has_data else "partial",
         window=current,
-        source_kind="simulated",
+        source_kind=getattr(backend, "source_kind", "simulated"),
         source_name="clickhouse",
         data={
             "current": current_metrics,
@@ -140,17 +140,21 @@ def analyze_resource_changes(
     window: TimeWindow,
     resource_backend: ResourceBackend | None = None,
 ) -> str:
-    deployments = context.deployments(dataset_id, service, window.start, window.end)
+    deployments = (
+        context.deployments(dataset_id, service, window.start, window.end)
+        if context is not None
+        else []
+    )
     resources = (
         resource_backend.query_resources(dataset_id, service, window.start, window.end)
         if resource_backend
         else []
     )
     return ToolResult[object](
-        status="ok" if resource_backend else "partial",
+        status="ok" if resources else "partial",
         window=window,
-        source_kind="simulated",
-        source_name="mysql",
+        source_kind=getattr(resource_backend, "source_kind", "simulated"),
+        source_name=getattr(resource_backend, "source_name", "mysql"),
         data={"deployments": deployments, "resources": resources},
-        warnings=[] if resource_backend else ["resource source is pending P8; deployments are not proof of causality"],
+        warnings=[] if resources else ["no matching resource samples; deployments are not proof of causality"],
     ).model_dump_json()

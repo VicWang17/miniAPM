@@ -147,7 +147,7 @@ def create_tools(
             )
 
         tools.append(compare_historical_baseline)
-    if deployment_context is not None:
+    if deployment_context is not None or resource_backend is not None:
         @tool(args_schema=ResourceQueryInput)
         def query_resource_changes(
             dataset_id: str, service: str, start: datetime, end: datetime

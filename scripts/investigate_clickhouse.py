@@ -5,6 +5,7 @@ from pathlib import Path
 from miniapm.clickhouse_backend import ClickHouseBackend
 from miniapm.investigation import run_investigation
 from miniapm.reports import save_report
+from miniapm.resource_backend import PrometheusResourceBackend
 
 
 def main() -> None:
@@ -15,9 +16,10 @@ def main() -> None:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("reports"))
+    parser.add_argument("--source-kind", choices=["simulated", "instrumented"], default="simulated")
     args = parser.parse_args()
 
-    backend = ClickHouseBackend(dataset_id=args.dataset_id)
+    backend = ClickHouseBackend(dataset_id=args.dataset_id, source_kind=args.source_kind)
     try:
         result = run_investigation(
             args.question,
@@ -25,6 +27,7 @@ def main() -> None:
             args.start,
             args.end,
             backend=backend,
+            resource_backend=PrometheusResourceBackend() if args.source_kind == "instrumented" else None,
             dataset_id=args.dataset_id,
         )
     finally:

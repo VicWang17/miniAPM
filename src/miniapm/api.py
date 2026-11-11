@@ -16,6 +16,7 @@ from miniapm.models import ContractModel, ServiceContext, ServiceName, TimeWindo
 from miniapm.investigation_manager import InvestigationManager, InvestigationQueueFull
 from miniapm.mysql_context import MySQLContext
 from miniapm.prometheus_backend import PrometheusBackend
+from miniapm.resource_backend import PrometheusResourceBackend
 
 DATASET_ID = UUID("018f2f70-0000-7000-8000-000000000001")
 SERVICE_CATALOG = {
@@ -183,7 +184,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             return json.loads(
                 analyze_resource_changes(
-                    context, str(query.dataset_id), query.service, query
+                    context, str(query.dataset_id), query.service, query,
+                    PrometheusResourceBackend(settings.prometheus_url),
                 )
             )
         finally:
