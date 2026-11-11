@@ -70,7 +70,7 @@ class ClickHouseBackend:
             filters.append("error_code = {error_code:String}")
             parameters["error_code"] = error_code
         rows = self._query(
-            "SELECT * FROM miniapm.logs WHERE " + " AND ".join(filters) + " ORDER BY event_time, trace_id LIMIT {limit:UInt32}",
+            "SELECT * FROM miniapm.logs_dedup WHERE " + " AND ".join(filters) + " ORDER BY event_time, trace_id LIMIT {limit:UInt32}",
             parameters,
         )
         return self._result(window, rows)
@@ -90,7 +90,7 @@ class ClickHouseBackend:
             f"""
             WITH candidates AS (
                 SELECT trace_id
-                FROM miniapm.spans
+                FROM miniapm.spans_dedup
                 WHERE service = {{service:String}}
                   AND {dataset_filter}
                   AND started_at >= parseDateTime64BestEffort({{start:String}}, 3, 'UTC')
@@ -100,7 +100,7 @@ class ClickHouseBackend:
                 LIMIT {{limit:UInt32}}
             )
             SELECT *, dateDiff('millisecond', started_at, ended_at) / 1000 AS duration_seconds
-            FROM miniapm.spans
+            FROM miniapm.spans_dedup
             WHERE trace_id IN candidates
             ORDER BY trace_id, started_at, span_id
             """,
@@ -184,11 +184,11 @@ class ClickHouseBackend:
                 f"""
                 WITH server_spans AS (
                     SELECT trace_id, dateDiff('millisecond', started_at, ended_at) / 1000 AS duration_seconds
-                    FROM miniapm.spans WHERE {server_filter}
+                    FROM miniapm.spans_dedup WHERE {server_filter}
                 ), totals AS (
                     SELECT count() AS request_count FROM server_spans
                 ), affected AS (
-                    SELECT DISTINCT trace_id, error_code FROM miniapm.logs
+                    SELECT DISTINCT trace_id, error_code FROM miniapm.logs_dedup
                     WHERE service = {{service:String}}
                       AND {dataset_filter}
                       AND event_time >= parseDateTime64BestEffort({{start:String}}, 3, 'UTC')
@@ -218,7 +218,7 @@ class ClickHouseBackend:
                        avg(dateDiff('millisecond', started_at, ended_at) / 1000) AS avg_seconds,
                        max(dateDiff('millisecond', started_at, ended_at) / 1000) AS max_seconds,
                        quantile(0.95)(dateDiff('millisecond', started_at, ended_at) / 1000) AS p95_seconds
-                FROM miniapm.spans
+                FROM miniapm.spans_dedup
                 WHERE {server_filter}
                 GROUP BY group_value
                 ORDER BY group_value
@@ -227,7 +227,7 @@ class ClickHouseBackend:
             )
         if dimension == "error_code":
             total_rows = self._query(
-                f"SELECT count() AS total FROM miniapm.spans WHERE {server_filter}",
+                f"SELECT count() AS total FROM miniapm.spans_dedup WHERE {server_filter}",
                 parameters,
             )
             total = total_rows[0]["total"]
