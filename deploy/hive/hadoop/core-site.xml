@@ -3,4 +3,12 @@
     <name>fs.defaultFS</name>
     <value>hdfs://127.0.0.1:9000</value>
   </property>
+  <property>
+    <name>dfs.namenode.name.dir</name>
+    <value>/data/namenode</value>
+  </property>
+  <property>
+    <name>dfs.datanode.data.dir</name>
+    <value>/data/datanode</value>
+  </property>
 </configuration>

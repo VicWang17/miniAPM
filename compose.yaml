@@ -4,6 +4,7 @@ services:
     user: root
     environment:
       SERVICE_NAME: hiveserver2
+      HADOOP_CLIENT_OPTS: "-Xmx2G"
       HADOOP_CONF_DIR: /etc/miniapm/hadoop
       HIVE_CONF_DIR: /etc/miniapm/hive
     entrypoint:
