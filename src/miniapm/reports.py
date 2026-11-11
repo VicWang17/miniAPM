@@ -27,6 +27,22 @@ class EvidenceRecord(ContractModel):
     result_summary: str
 
 
+class SubagentCall(ContractModel):
+    call_id: str
+    tool_name: str
+    arguments: dict = Field(default_factory=dict)
+    status: str
+    result_summary: str
+
+
+class SubagentRun(ContractModel):
+    agent_name: str
+    status: str
+    end_reason: str
+    summary: str
+    calls: list[SubagentCall]
+
+
 class InvestigationReport(ContractModel):
     investigation_id: UUID = Field(default_factory=uuid4)
     question: str
@@ -35,8 +51,10 @@ class InvestigationReport(ContractModel):
     source_types: list[str]
     final_answer: str
     evidence: list[EvidenceRecord]
+    subagent_runs: list[SubagentRun] = Field(default_factory=list)
     limitations: list[str]
     tool_calls: int
+    supervisor_tool_calls: int = 0
     duration_seconds: float
     end_reason: EndReason
 
@@ -50,6 +68,8 @@ def build_report(
     duration_seconds: float,
     end_reason: EndReason,
     final_answer: str,
+    shared_tool_attempts: int | None = None,
+    subagent_runs: list[SubagentRun] | None = None,
 ) -> InvestigationReport:
     arguments_by_id = {}
     for message in messages:
@@ -70,10 +90,15 @@ def build_report(
                 "warnings": ["tool returned a non-JSON result"],
                 "data": str(message.content)[:2000],
             }
-        source_name = result.get("source_name", "unknown")
+        source_name = result.get("source_name", result.get("agent", "unknown"))
         source_types.add(source_name)
         limitations.extend(result.get("warnings", []))
-        summary = json.dumps(result.get("data"), ensure_ascii=False, default=str)[:2000]
+        if result.get("agent") and result.get("end_reason") != "completed":
+            limitations.append(f"{result['agent']} ended with {result['end_reason']}")
+        raw_data = result.get("data")
+        if raw_data is None and "summary" in result:
+            raw_data = {"summary": result["summary"], "calls": result.get("calls", [])}
+        summary = json.dumps(raw_data, ensure_ascii=False, default=str)[:2000]
         evidence.append(
             EvidenceRecord(
                 evidence_id=f"E{len(evidence) + 1:03d}",
@@ -93,10 +118,35 @@ def build_report(
         final_answer=final_answer,
         evidence=evidence,
         limitations=list(dict.fromkeys(limitations)),
-        tool_calls=tool_calls,
+        tool_calls=shared_tool_attempts if shared_tool_attempts is not None else tool_calls,
+        supervisor_tool_calls=tool_calls,
+        subagent_runs=subagent_runs or [],
         duration_seconds=round(duration_seconds, 3),
         end_reason=end_reason,
     )
+
+
+def validate_report(report: InvestigationReport) -> None:
+    if report.end_reason == "completed" and not report.final_answer.strip():
+        raise ValueError("completed report requires a final answer")
+    if report.end_reason != "completed" and report.end_reason not in report.final_answer:
+        raise ValueError("forced termination must include its end reason")
+    evidence_ids = [item.evidence_id for item in report.evidence]
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise ValueError("evidence_id values must be unique")
+    if any(not item.call_id for item in report.evidence):
+        raise ValueError("evidence call_id is required")
+    if report.supervisor_tool_calls > report.tool_calls:
+        raise ValueError("global tool count is smaller than supervisor count")
+    if report.tool_calls < len(report.evidence):
+        raise ValueError("global tool count is smaller than evidence count")
+    if any(item.status in {"error", "partial"} for item in report.evidence) and not report.limitations:
+        raise ValueError("error or partial evidence requires limitations")
+    for run in report.subagent_runs:
+        if not run.summary.strip():
+            raise ValueError("subagent summary is required")
+        if any(not call.call_id for call in run.calls):
+            raise ValueError("subagent call_id is required")
 
 
 def render_markdown(report: InvestigationReport) -> str:
@@ -127,6 +177,22 @@ def render_markdown(report: InvestigationReport) -> str:
                 "",
             ]
         )
+    for run in report.subagent_runs:
+        lines.extend(
+            [
+                f"## 子 Agent：{run.agent_name}",
+                "",
+                f"状态：{run.status}；结束原因：{run.end_reason}",
+                "",
+                run.summary,
+                "",
+            ]
+        )
+        for call in run.calls:
+            lines.append(
+                f"- {call.call_id} · {call.tool_name} · {call.status} · `{call.result_summary}`"
+            )
+        lines.append("")
     if report.limitations:
         lines.extend(["## 限制与警告", ""])
         lines.extend(f"- {warning}" for warning in report.limitations)
@@ -134,6 +200,7 @@ def render_markdown(report: InvestigationReport) -> str:
 
 
 def save_report(report: InvestigationReport, output_dir: Path) -> tuple[Path, Path]:
+    validate_report(report)
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = f"investigation-{report.investigation_id}"
     json_path = output_dir / f"{stem}.json"

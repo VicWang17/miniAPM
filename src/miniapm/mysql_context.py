@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pymysql
 
 from miniapm.models import ContractModel, TimeWindow
-from miniapm.reports import InvestigationReport
+from miniapm.reports import InvestigationReport, validate_report
 from miniapm.topology import Topology
 
 
@@ -155,6 +155,7 @@ class MySQLContext:
         report: InvestigationReport,
         max_report_bytes: int = 100_000,
     ) -> None:
+        validate_report(report)
         document = report.model_dump_json()
         if len(document.encode("utf-8")) > max_report_bytes:
             raise ValueError("report_json exceeds the configured size limit")

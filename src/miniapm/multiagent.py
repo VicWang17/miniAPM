@@ -16,7 +16,7 @@ from miniapm.investigation import (
     create_investigation_agent,
 )
 from miniapm.models import ServiceName, TimeWindow
-from miniapm.reports import build_report
+from miniapm.reports import SubagentCall, SubagentRun, build_report
 from miniapm.tools import ResourceQueryInput
 
 SUPERVISOR_PROMPT = """You are the lead APM investigator.
@@ -26,6 +26,19 @@ Do not call both by default and do not follow a fixed sequence.
 Use returned evidence to decide follow-up queries or finish.
 Subagents return bounded summaries, not ground truth. State missing evidence and contradictions explicitly.
 Produce the final answer yourself with evidence-based conclusions and limitations.
+"""
+
+TELEMETRY_PROMPT = """You are the telemetry investigation subagent.
+Query only the metrics, logs, traces and grouped/window analyses needed for the assigned question.
+Use server spans or request events as request denominators. Correlate follow-up logs with returned trace_id and version values.
+Missing spans or empty logs mean missing evidence, not proof that a call or failure did not happen.
+Return a concise evidence summary with query parameters and explicit limitations. Do not infer internal root causes without direct evidence.
+"""
+
+RESOURCE_CHANGE_PROMPT = """You are the resource and deployment investigation subagent.
+Check deployments and available resource evidence for the exact dataset, service and time window.
+A deployment is only a clue, never proof of causality. Correlate timing and entity, and actively report contradictory evidence.
+If resource data is unavailable, state partial coverage instead of guessing. Return a concise summary of evidence and unresolved questions.
 """
 
 
@@ -62,6 +75,7 @@ def _subagent_summary(agent_name: str, result: dict) -> str:
             content = {"status": "error", "data": message.content}
         calls.append(
             {
+                "call_id": message.tool_call_id,
                 "tool": message.name,
                 "arguments": arguments.get(message.tool_call_id, {}),
                 "status": content.get("status", "error"),
@@ -78,6 +92,36 @@ def _subagent_summary(agent_name: str, result: dict) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def _subagent_runs(messages: list) -> list[SubagentRun]:
+    runs = []
+    for message in messages:
+        if not isinstance(message, ToolMessage) or message.name not in {
+            "telemetry_investigation",
+            "resource_change_investigation",
+        }:
+            continue
+        content = json.loads(message.content)
+        runs.append(
+            SubagentRun(
+                agent_name=content["agent"],
+                status=content["status"],
+                end_reason=content["end_reason"],
+                summary=content["summary"],
+                calls=[
+                    SubagentCall(
+                        call_id=call["call_id"],
+                        tool_name=call["tool"],
+                        arguments=call["arguments"],
+                        status=call["status"],
+                        result_summary=call["summary"],
+                    )
+                    for call in content["calls"]
+                ],
+            )
+        )
+    return runs
 
 
 def _as_tool(name: str, agent: CompiledStateGraph, deadline: float):
@@ -108,6 +152,7 @@ def create_multiagent_investigation(
         window,
         backend,
         shared_budget=shared_budget,
+        system_prompt=TELEMETRY_PROMPT,
     )
 
     @tool(args_schema=ResourceQueryInput)
@@ -130,6 +175,7 @@ def create_multiagent_investigation(
         backend,
         shared_budget=shared_budget,
         tools_override=(query_resource_changes,),
+        system_prompt=RESOURCE_CHANGE_PROMPT,
     )
     return create_investigation_agent(
         model,
@@ -186,5 +232,7 @@ async def arun_multiagent_investigation(
         duration_seconds=time.monotonic() - started,
         end_reason=result["end_reason"],
         final_answer=result["final_answer"],
+        shared_tool_attempts=shared_budget.attempts,
+        subagent_runs=_subagent_runs(result["messages"]),
     )
     return {**result, "report": report, "shared_tool_attempts": shared_budget.attempts}
