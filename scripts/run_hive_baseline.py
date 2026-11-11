@@ -52,17 +52,23 @@ def main() -> None:
     beeline(DDL)
     beeline("MSCK REPAIR TABLE miniapm_spans")
     query = f"""
-SELECT service, route, dt,
+WITH ranked AS (
+  SELECT service, route, status, duration_seconds,
+         ROW_NUMBER() OVER (PARTITION BY service, route ORDER BY duration_seconds) AS duration_rank,
+         COUNT(*) OVER (PARTITION BY service, route) AS sample_count
+  FROM miniapm_spans
+  WHERE dataset_id = '{dataset_id}'
+    AND dt >= '{args.start_date}' AND dt <= '{args.end_date}'
+    AND kind = 'server'
+)
+SELECT service, route,
        COUNT(*) AS request_count,
        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count,
        AVG(duration_seconds) AS avg_seconds,
-       PERCENTILE_APPROX(duration_seconds, 0.95) AS p95_seconds
-FROM miniapm_spans
-WHERE dataset_id = '{dataset_id}'
-  AND dt >= '{args.start_date}' AND dt <= '{args.end_date}'
-  AND kind = 'server'
-GROUP BY service, route, dt
-ORDER BY service, route, dt
+       MAX(CASE WHEN duration_rank = CEIL(sample_count * 0.95) THEN duration_seconds END) AS p95_seconds
+FROM ranked
+GROUP BY service, route
+ORDER BY service, route
 """
     output = beeline(query)
     csv_rows = list(csv.reader(io.StringIO(output.strip())))
