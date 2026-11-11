@@ -6,8 +6,17 @@ from miniapm.models import TimeWindow, ToolResult
 
 
 class ClickHouseBackend:
-    def __init__(self, base_url: str = "http://127.0.0.1:8123") -> None:
+    def __init__(
+        self, base_url: str = "http://127.0.0.1:8123", dataset_id: str | None = None
+    ) -> None:
         self.client = httpx.Client(base_url=base_url, timeout=5, trust_env=False)
+        self.dataset_id = dataset_id
+
+    def _dataset_filter(self, parameters: dict) -> str:
+        if self.dataset_id:
+            parameters["dataset_id"] = self.dataset_id
+            return "dataset_id = {dataset_id:UUID}"
+        return "1 = 1"
 
     def close(self) -> None:
         self.client.close()
@@ -50,6 +59,7 @@ class ClickHouseBackend:
             "event_time < parseDateTime64BestEffort({end:String}, 3, 'UTC')",
         ]
         parameters = {"service": service, "start": window.start.isoformat(), "end": window.end.isoformat(), "limit": max(1, min(limit, 200))}
+        filters.append(self._dataset_filter(parameters))
         if trace_id:
             filters.append("trace_id = {trace_id:String}")
             parameters["trace_id"] = trace_id
@@ -75,17 +85,19 @@ class ClickHouseBackend:
             "end": window.end.isoformat(),
             "limit": max(1, min(limit, 20)),
         }
+        dataset_filter = self._dataset_filter(parameters)
         rows = self._query(
-            """
+            f"""
             WITH candidates AS (
                 SELECT trace_id
                 FROM miniapm.spans
-                WHERE service = {service:String}
-                  AND started_at >= parseDateTime64BestEffort({start:String}, 3, 'UTC')
-                  AND started_at < parseDateTime64BestEffort({end:String}, 3, 'UTC')
+                WHERE service = {{service:String}}
+                  AND {dataset_filter}
+                  AND started_at >= parseDateTime64BestEffort({{start:String}}, 3, 'UTC')
+                  AND started_at < parseDateTime64BestEffort({{end:String}}, 3, 'UTC')
                 GROUP BY trace_id
                 ORDER BY max(ended_at - started_at) DESC
-                LIMIT {limit:UInt32}
+                LIMIT {{limit:UInt32}}
             )
             SELECT *, dateDiff('millisecond', started_at, ended_at) / 1000 AS duration_seconds
             FROM miniapm.spans
@@ -148,6 +160,87 @@ class ClickHouseBackend:
             "duration_seconds": root["duration_seconds"] if root else None,
             "roots": roots,
         }
+
+    def group_analysis(
+        self, service: str, start: datetime, end: datetime, dimension: str
+    ) -> str:
+        if dimension not in {"version", "instance", "route", "error_code"}:
+            raise ValueError("unsupported group dimension")
+        window = TimeWindow(start=start, end=end)
+        parameters = {
+            "service": service,
+            "start": window.start.isoformat(),
+            "end": window.end.isoformat(),
+        }
+        dataset_filter = self._dataset_filter(parameters)
+        server_filter = f"""
+            service = {{service:String}} AND kind = 'server'
+            AND {dataset_filter}
+            AND started_at >= parseDateTime64BestEffort({{start:String}}, 3, 'UTC')
+            AND started_at < parseDateTime64BestEffort({{end:String}}, 3, 'UTC')
+        """
+        if dimension == "error_code":
+            rows = self._query(
+                f"""
+                WITH server_spans AS (
+                    SELECT trace_id, dateDiff('millisecond', started_at, ended_at) / 1000 AS duration_seconds
+                    FROM miniapm.spans WHERE {server_filter}
+                ), totals AS (
+                    SELECT count() AS request_count FROM server_spans
+                ), affected AS (
+                    SELECT DISTINCT trace_id, error_code FROM miniapm.logs
+                    WHERE service = {{service:String}}
+                      AND {dataset_filter}
+                      AND event_time >= parseDateTime64BestEffort({{start:String}}, 3, 'UTC')
+                      AND event_time < parseDateTime64BestEffort({{end:String}}, 3, 'UTC')
+                      AND error_code IS NOT NULL
+                )
+                SELECT affected.error_code AS group_value,
+                       totals.request_count AS request_count,
+                       count() AS error_count,
+                       avg(server_spans.duration_seconds) AS avg_seconds,
+                       max(server_spans.duration_seconds) AS max_seconds,
+                       quantile(0.95)(server_spans.duration_seconds) AS p95_seconds
+                FROM affected
+                INNER JOIN server_spans USING (trace_id)
+                CROSS JOIN totals
+                GROUP BY group_value, request_count
+                ORDER BY error_count DESC, group_value
+                """,
+                parameters,
+            )
+        else:
+            rows = self._query(
+                f"""
+                SELECT {dimension} AS group_value,
+                       count() AS request_count,
+                       countIf(status = 'error') AS error_count,
+                       avg(dateDiff('millisecond', started_at, ended_at) / 1000) AS avg_seconds,
+                       max(dateDiff('millisecond', started_at, ended_at) / 1000) AS max_seconds,
+                       quantile(0.95)(dateDiff('millisecond', started_at, ended_at) / 1000) AS p95_seconds
+                FROM miniapm.spans
+                WHERE {server_filter}
+                GROUP BY group_value
+                ORDER BY group_value
+                """,
+                parameters,
+            )
+        if dimension == "error_code":
+            total_rows = self._query(
+                f"SELECT count() AS total FROM miniapm.spans WHERE {server_filter}",
+                parameters,
+            )
+            total = total_rows[0]["total"]
+        else:
+            total = sum(row["request_count"] for row in rows)
+        return self._result(
+            window,
+            {
+                "dimension": dimension,
+                "request_denominator": total,
+                "groups": rows,
+            },
+        )
 
     def query_metrics(self, service: str, start: datetime, end: datetime) -> str:
         return ToolResult[object](
