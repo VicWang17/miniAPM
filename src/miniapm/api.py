@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from miniapm.alerts import AlertmanagerNotification
+from miniapm.alerts import AlertmanagerNotification, record_firing_alert
 from miniapm.analysis import GroupDimension, analyze_groups, analyze_resource_changes, analyze_traces, compare_windows
 from miniapm.clickhouse_backend import ClickHouseBackend
 from miniapm.config import Settings
@@ -158,14 +158,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             context.close()
 
     @app.post("/api/v1/alerts/webhook", status_code=202)
-    def alert_webhook(notification: AlertmanagerNotification) -> dict:
-        return {
-            "accepted": len(notification.alerts),
-            "alerts": [
-                {"fingerprint": alert.fingerprint, "status": alert.status}
-                for alert in notification.alerts
-            ],
-        }
+    def alert_webhook(http_request: Request, notification: AlertmanagerNotification) -> dict:
+        context = http_request.app.state.investigations.context
+        results = [
+            record_firing_alert(context, alert, DATASET_ID)
+            if alert.status == "firing"
+            else {"fingerprint": alert.fingerprint, "result": "resolved_pending"}
+            for alert in notification.alerts
+        ]
+        return {"accepted": len(results), "alerts": results}
 
     @app.post("/api/v1/investigations", status_code=202)
     async def create_investigation(
