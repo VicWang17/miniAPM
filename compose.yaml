@@ -1,4 +1,13 @@
 services:
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
   prometheus:
     image: prom/prometheus:v3.5.0
     command:
@@ -60,6 +69,7 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
 
 volumes:
+  alertmanager-data:
   prometheus-data:
   grafana-data:
   clickhouse-data:
