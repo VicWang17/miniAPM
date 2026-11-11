@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -31,12 +32,20 @@ def create_instrumented_app() -> FastAPI:
     provider, publisher = create_tracer_provider(resource)
     trace.set_tracer_provider(provider)
     state = {"cpu_fault": False}
+    fault_stop = threading.Event()
+    fault_thread = None
+
+    def burn_cpu() -> None:
+        while not fault_stop.is_set():
+            pass
+
     metrics = InstrumentedMetrics()
     logger = logging.getLogger("miniapm.service")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
+        fault_stop.set()
         provider.shutdown()
         publisher.close()
 
@@ -72,12 +81,25 @@ def create_instrumented_app() -> FastAPI:
 
     @app.post("/fault")
     def set_fault(request: FaultInput) -> dict:
+        nonlocal fault_thread
         state["cpu_fault"] = request.enabled
+        if request.enabled and (fault_thread is None or not fault_thread.is_alive()):
+            fault_stop.clear()
+            fault_thread = threading.Thread(target=burn_cpu, daemon=True)
+            fault_thread.start()
+        elif not request.enabled:
+            fault_stop.set()
+            if fault_thread is not None:
+                fault_thread.join(timeout=1)
         logger.info("cpu fault changed to %s", request.enabled, extra={"route": "/fault"})
         return {"service": service, **state}
 
     @app.post("/inventory/reserve")
     async def reserve() -> dict:
+        if state["cpu_fault"]:
+            deadline = time.process_time() + 0.2
+            while time.process_time() < deadline:
+                pass
         logger.info("inventory reservation completed", extra={"route": "/inventory/reserve"})
         return {
             "service": "inventory",
