@@ -161,6 +161,30 @@ class ClickHouseBackend:
             "roots": roots,
         }
 
+    def window_metrics(self, service: str, start: datetime, end: datetime) -> dict:
+        window = TimeWindow(start=start, end=end)
+        parameters = {
+            "service": service,
+            "start": window.start.isoformat(),
+            "end": window.end.isoformat(),
+        }
+        dataset_filter = self._dataset_filter(parameters)
+        rows = self._query(
+            f"""
+            SELECT count() AS request_count,
+                   countIf(status = 'error') AS error_count,
+                   avg(dateDiff('millisecond', started_at, ended_at) / 1000) AS avg_seconds,
+                   quantile(0.95)(dateDiff('millisecond', started_at, ended_at) / 1000) AS p95_seconds
+            FROM miniapm.spans_dedup
+            WHERE service = {{service:String}} AND kind = 'server'
+              AND {dataset_filter}
+              AND started_at >= parseDateTime64BestEffort({{start:String}}, 3, 'UTC')
+              AND started_at < parseDateTime64BestEffort({{end:String}}, 3, 'UTC')
+            """,
+            parameters,
+        )
+        return rows[0]
+
     def group_analysis(
         self, service: str, start: datetime, end: datetime, dimension: str
     ) -> str:
