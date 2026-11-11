@@ -22,6 +22,12 @@
       "durable": true,
       "queue_type": "classic",
       "vhost": "/"
+    },
+    {
+      "name": "miniapm.dead-letter",
+      "durable": true,
+      "queue_type": "classic",
+      "vhost": "/"
     }
   ],
   "bindings": [
@@ -37,6 +43,13 @@
       "destination": "miniapm.spans",
       "destination_type": "queue",
       "routing_key": "spans",
+      "vhost": "/"
+    },
+    {
+      "source": "miniapm.telemetry",
+      "destination": "miniapm.dead-letter",
+      "destination_type": "queue",
+      "routing_key": "dead-letter",
       "vhost": "/"
     }
   ]

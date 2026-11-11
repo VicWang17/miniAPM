@@ -13,6 +13,8 @@ async def main() -> None:
     parser.add_argument("--flush-interval", type=float, default=1)
     parser.add_argument("--max-pending", type=int, default=2000)
     parser.add_argument("--max-messages", type=int, default=0)
+    parser.add_argument("--max-retries", type=int, default=2)
+    parser.add_argument("--retry-delay", type=float, default=1)
     args = parser.parse_args()
 
     writer = BatchingClickHouseWriter(
@@ -21,7 +23,12 @@ async def main() -> None:
         max_pending_events=args.max_pending,
     )
     processed = 0
-    async with RabbitMQConsumer(writer, prefetch=args.prefetch) as consumer:
+    async with RabbitMQConsumer(
+        writer,
+        prefetch=args.prefetch,
+        max_retries=args.max_retries,
+        retry_delay_seconds=args.retry_delay,
+    ) as consumer:
         while args.max_messages == 0 or processed < args.max_messages:
             remaining = args.max_messages - processed if args.max_messages else args.batch_size
             batch_limit = min(args.batch_size, remaining)
