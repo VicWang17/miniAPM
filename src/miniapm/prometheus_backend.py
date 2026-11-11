@@ -44,7 +44,7 @@ class PrometheusBackend:
                 f"miniapm_request_duration_seconds_bucket{{{selected}}}[{range_seconds}s])))"
             ),
         }
-        with httpx.Client(base_url=self.base_url, timeout=5) as client:
+        with httpx.Client(base_url=self.base_url, timeout=5, trust_env=False) as client:
             values = {
                 name: self._query(client, promql, window.end)
                 for name, promql in queries.items()

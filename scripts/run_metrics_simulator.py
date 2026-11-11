@@ -15,6 +15,7 @@ async def main() -> None:
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--rate", type=float, default=5)
     parser.add_argument("--max-in-flight", type=int, default=100)
+    parser.add_argument("--fault-mode", choices=["normal", "slow", "mixed"], default="mixed")
     parser.add_argument(
         "--dataset-id",
         type=UUID,
@@ -33,9 +34,12 @@ async def main() -> None:
     )
 
     def parameters(request_number: int) -> RequestParameters:
+        is_slow = args.fault_mode == "slow" or (
+            args.fault_mode == "mixed" and request_number % 20 == 0
+        )
         return RequestParameters(
-            inventory_duration_seconds=1.6 if request_number % 20 == 0 else 0.08,
-            error=request_number % 100 == 99,
+            inventory_duration_seconds=1.6 if is_slow else 0.08,
+            error=args.fault_mode == "mixed" and request_number % 100 == 99,
         )
 
     await asyncio.gather(
