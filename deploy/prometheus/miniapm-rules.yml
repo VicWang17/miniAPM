@@ -11,6 +11,7 @@ groups:
         for: 30s
         labels:
           severity: warning
+          dataset_id: 018f2f70-0000-7000-8000-000000000606
         annotations:
           summary: "Sustained high P95 latency on {{ $labels.service }}"
       - alert: MiniapmHighErrorRatio
@@ -24,6 +25,7 @@ groups:
         for: 30s
         labels:
           severity: warning
+          dataset_id: 018f2f70-0000-7000-8000-000000000606
         annotations:
           summary: "Sustained high error ratio on {{ $labels.service }}"
   - name: miniapm-intake-alerts
@@ -33,6 +35,7 @@ groups:
         for: 30s
         labels:
           severity: warning
+          dataset_id: 018f2f70-0000-7000-8000-000000000606
           service: order
         annotations:
           summary: "RabbitMQ telemetry backlog exceeds 100 messages"
