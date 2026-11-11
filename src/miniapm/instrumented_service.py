@@ -63,6 +63,7 @@ def create_instrumented_app() -> FastAPI:
 
     @app.get("/metrics", include_in_schema=False)
     def prometheus_metrics() -> Response:
+        metrics.observe_process()
         return Response(generate_latest(metrics.registry), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/healthz")

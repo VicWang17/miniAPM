@@ -106,6 +106,15 @@ class InstrumentedMetrics:
     def __init__(self) -> None:
         self.registry = CollectorRegistry()
         labels = ("dataset_id", "service", "instance", "version", "route", "source_kind")
+        process_labels = ("dataset_id", "service", "instance", "version", "source_kind")
+        self.process_cpu = Gauge(
+            "miniapm_linux_process_cpu_seconds_total", "Target process CPU time from /proc/self/stat",
+            process_labels, registry=self.registry,
+        )
+        self.process_rss = Gauge(
+            "miniapm_linux_process_resident_memory_bytes", "Target process RSS from /proc/self/stat",
+            process_labels, registry=self.registry,
+        )
         self.requests = Counter("miniapm_requests_total", "Instrumented HTTP requests", (*labels, "status"), registry=self.registry)
         self.in_flight = Gauge("miniapm_requests_in_flight", "Instrumented requests in flight", labels, registry=self.registry)
         self.duration = Histogram(
@@ -135,3 +144,12 @@ class InstrumentedMetrics:
         self.in_flight.labels(**labels).dec()
         self.requests.labels(**labels, status=status).inc()
         self.duration.labels(**labels).observe(time.monotonic() - started)
+
+    def observe_process(self) -> None:
+        fields = open("/proc/self/stat", encoding="utf-8").read().split()
+        cpu_seconds = (int(fields[13]) + int(fields[14])) / os.sysconf("SC_CLK_TCK")
+        rss_bytes = int(fields[23]) * os.sysconf("SC_PAGE_SIZE")
+        labels = self.labels("/proc/self")
+        labels.pop("route")
+        self.process_cpu.labels(**labels).set(cpu_seconds)
+        self.process_rss.labels(**labels).set(rss_bytes)
