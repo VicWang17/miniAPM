@@ -66,8 +66,9 @@ class RabbitMQConsumer:
         pending = []
         processed = 0
         try:
-            while processed < max_messages:
-                method, _, body = self.channel.basic_get(queue=queue, auto_ack=False)
+            for method, _, body in self.channel.consume(
+                queue=queue, auto_ack=False, inactivity_timeout=0.2
+            ):
                 if method is None:
                     break
                 event = json.loads(body)
@@ -79,11 +80,15 @@ class RabbitMQConsumer:
                 else:
                     raise ValueError("unsupported queue")
                 processed += 1
+                if processed >= max_messages:
+                    break
+            self.channel.cancel()
             await self.writer.flush()
             for delivery_tag, _ in pending:
                 self.channel.basic_ack(delivery_tag=delivery_tag)
             return processed
         except Exception:
+            self.channel.cancel()
             if pending:
                 self._retry_or_dead_letter(queue, pending)
                 return processed
