@@ -1,4 +1,29 @@
 services:
+  hive:
+    image: apache/hive:4.0.1
+    user: root
+    environment:
+      SERVICE_NAME: hiveserver2
+      HADOOP_CONF_DIR: /etc/miniapm/hadoop
+      HIVE_CONF_DIR: /etc/miniapm/hive
+    entrypoint:
+      - bash
+      - -lc
+    command:
+      - |
+        mkdir -p /data/namenode /data/datanode /data/metastore
+        if [ ! -d /data/namenode/current ]; then /opt/hadoop/bin/hdfs namenode -format -force; fi
+        /opt/hadoop/bin/hdfs --daemon start namenode
+        /opt/hadoop/bin/hdfs --daemon start datanode
+        /opt/hive/bin/schematool -dbType derby -initSchema || /opt/hive/bin/schematool -dbType derby -info
+        exec /opt/hive/bin/hive --service hiveserver2
+    ports:
+      - "10000:10000"
+      - "9870:9870"
+    volumes:
+      - ./deploy/hive/hadoop:/etc/miniapm/hadoop:ro
+      - ./deploy/hive/hive-site.xml:/etc/miniapm/hive/hive-site.xml:ro
+      - hive-data:/data
   alertmanager:
     image: prom/alertmanager:v0.28.1
     command:
@@ -69,6 +94,7 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
 
 volumes:
+  hive-data:
   alertmanager-data:
   prometheus-data:
   grafana-data:
