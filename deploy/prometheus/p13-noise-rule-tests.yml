@@ -1,0 +1,55 @@
+rule_files:
+  - p13-noise-test-rules.yml
+evaluation_interval: 10s
+tests:
+  # N02 short spike: expression true for 20s, shorter than for=30s, so it must not fire.
+  - interval: 10s
+    input_series:
+      - series: "p13_lifecycle_probe"
+        values: "0x2 1x2 0x12"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: P13LifecycleProbe
+        exp_alerts: []
+
+  # N02 sustained: expression stays true, for=30s elapses, alert fires.
+  - interval: 10s
+    input_series:
+      - series: "p13_lifecycle_probe"
+        values: "1x12"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: P13LifecycleProbe
+        exp_alerts:
+          - exp_labels:
+              policy: experiment
+              severity: warning
+            exp_annotations:
+              summary: "P13 lifecycle probe"
+
+  # N04 recovery flap: after firing, a 40s recovery is shorter than
+  # keep_firing_for=1m, so the alert must remain firing instead of resolving.
+  - interval: 10s
+    input_series:
+      - series: "p13_lifecycle_probe"
+        values: "1x12 0x4 1x6"
+    alert_rule_test:
+      - eval_time: 2m30s
+        alertname: P13LifecycleProbe
+        exp_alerts:
+          - exp_labels:
+              policy: experiment
+              severity: warning
+            exp_annotations:
+              summary: "P13 lifecycle probe"
+
+  # N04 stable recovery: after firing, the expression stays false past
+  # keep_firing_for=1m, so the alert must resolve.
+  - interval: 10s
+    input_series:
+      - series: "p13_lifecycle_probe"
+        values: "1x12 0x24"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: P13LifecycleProbe
+        exp_alerts: []

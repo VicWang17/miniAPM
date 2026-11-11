@@ -9,6 +9,7 @@ groups:
             sum by (service) (rate(miniapm_requests_total[1m])) > 0.1
           )
         for: 30s
+        keep_firing_for: 1m
         labels:
           severity: warning
           dataset_id: 018f2f70-0000-7000-8000-000000000606
@@ -23,6 +24,7 @@ groups:
             sum by (service) (rate(miniapm_requests_total[1m])) > 0.1
           )
         for: 30s
+        keep_firing_for: 1m
         labels:
           severity: warning
           dataset_id: 018f2f70-0000-7000-8000-000000000606
@@ -33,6 +35,7 @@ groups:
       - alert: MiniapmIntakeBacklog
         expr: sum(rabbitmq_queue_messages_ready{queue=~"miniapm.logs|miniapm.spans"}) > 100
         for: 30s
+        keep_firing_for: 1m
         labels:
           severity: warning
           dataset_id: 018f2f70-0000-7000-8000-000000000606

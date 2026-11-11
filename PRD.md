@@ -478,6 +478,18 @@ N01–N07 各自记录场景、已有/新增、实际验证方式、结果和限
 
 简历只引用实际通过的类型和实验数字，分别描述确定性处理与 Agent 辅助审查；不宣称复现 PagerDuty 历史预测 Auto-Pause、生产级漏报率或自动根因关联。
 
+### 17.6 实现记录（2026-11-12）
+
+已实现 `keep_firing_for: 1m`（三条业务规则）、`src/miniapm/noise.py` 的确定性分层抽样、降噪审查主从 Agent、发现去重与本地 JSONL、单进程调度，以及 `scripts/verify_p13.py`（48 项检查，含真实模型）。
+
+与 17.1–17.5 的实现差异与理由：
+
+- 去重键不直接用模型自由文本的问题类型：改为「告警指纹（缺省时用归一化目标）+ 问题分桶 + 规则」。同一指纹在两次运行中被改写措辞（如 flapping 与 recovery flapping）仍会命中同一条并更新证据，避免每个周期重复通知。
+- N02/N04 的生命周期语义用镜像规则（同 `for=30s`、`keep_firing_for=1m`，gauge 驱动）做 promtool 单测，同时断言真实业务规则携带相同参数；业务表达式本身仍由 P6/P11 的真实运行覆盖，不宣称直方图表达式已被单测。
+- N05 用 Alertmanager 接收端点注入探针告警并施加限时 Silence，而非临时修改业务规则；被抑制告警可能不进入 MySQL，作为覆盖缺口记录。
+- 审查子 Agent 的工具调用必须串行（`tool_concurrency=1`），因为工具共享同一个 MySQL 连接；并发会破坏 pymysql 协议。
+- 模型停服时 `end_reason=model_error`、`category=error`，不记为 `no_action`；主管家若未返回 JSON，则回退解析子 Agent 结果并标注 `parse_fallback`。
+
 公开依据：[PagerDuty 降噪](https://docs.pagerduty.com/ai-automation/aiops/noise-reduction)、[Azure 维护期通知处理](https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-processing-rules)、[Prometheus 告警保持](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)、[Alertmanager 通知配置](https://prometheus.io/docs/alerting/latest/configuration/)。
 
 

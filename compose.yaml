@@ -40,6 +40,7 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
     ports:
       - "9090:9090"
     volumes:
@@ -47,6 +48,8 @@ services:
       - ./deploy/prometheus/miniapm-rules.yml:/etc/prometheus/miniapm-rules.yml:ro
       - ./deploy/prometheus/miniapm-slo-rules.yml:/etc/prometheus/miniapm-slo-rules.yml:ro
       - ./deploy/prometheus/miniapm-slo-rules-test.yml:/etc/prometheus/miniapm-slo-rules-test.yml:ro
+      - ./deploy/prometheus/p13-noise-test-rules.yml:/etc/prometheus/p13-noise-test-rules.yml:ro
+      - ./deploy/prometheus/p13-noise-rule-tests.yml:/etc/prometheus/p13-noise-rule-tests.yml:ro
       - prometheus-data:/prometheus
   grafana:
     image: grafana/grafana:12.1.0

@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import json
 from datetime import UTC, datetime
 
 import pymysql
 
 from miniapm.models import ContractModel, TimeWindow
-from miniapm.reports import InvestigationReport, validate_report
 from miniapm.topology import Topology
 
 
@@ -155,6 +156,8 @@ class MySQLContext:
         report: InvestigationReport,
         max_report_bytes: int = 100_000,
     ) -> None:
+        from miniapm.reports import validate_report
+
         validate_report(report)
         document = report.model_dump_json()
         if len(document.encode("utf-8")) > max_report_bytes:
@@ -424,6 +427,56 @@ class MySQLContext:
             )
             row = cursor.fetchone()
         return None if row is None else row[0]
+
+    def alerts_between(self, start: datetime, end: datetime, limit: int = 500) -> list[dict]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT event_key, fingerprint, status, started_at, resolved_at,
+                       investigation_id, labels_json
+                FROM alerts
+                WHERE started_at >= %s AND started_at < %s
+                ORDER BY started_at, event_key
+                LIMIT %s
+                """,
+                (self._mysql_time(start), self._mysql_time(end), min(limit, 1000)),
+            )
+            rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            labels = json.loads(row[6]) if row[6] else {}
+            result.append(
+                {
+                    "event_key": row[0],
+                    "fingerprint": row[1],
+                    "status": row[2],
+                    "started_at": row[3].replace(tzinfo=UTC).isoformat() if row[3] else None,
+                    "resolved_at": row[4].replace(tzinfo=UTC).isoformat() if row[4] else None,
+                    "investigation_id": row[5],
+                    "labels": labels,
+                    "alertname": labels.get("alertname") or labels.get("summary") or "unknown",
+                    "service": labels.get("service") or "unknown",
+                }
+            )
+        return result
+
+    def alert_fingerprint_stats(self, start: datetime, end: datetime) -> dict[str, dict]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT fingerprint, COUNT(*) AS events,
+                       SUM(status='firing') AS firing, SUM(status='resolved') AS resolved
+                FROM alerts
+                WHERE started_at >= %s AND started_at < %s
+                GROUP BY fingerprint
+                """,
+                (self._mysql_time(start), self._mysql_time(end)),
+            )
+            rows = cursor.fetchall()
+        return {
+            row[0]: {"events": int(row[1]), "firing": int(row[2] or 0), "resolved": int(row[3] or 0)}
+            for row in rows
+        }
 
     def case_by_investigation(self, investigation_id: str) -> dict | None:
         with self.connection.cursor() as cursor:

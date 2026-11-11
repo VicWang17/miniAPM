@@ -1,0 +1,15 @@
+# P13 lifecycle test mirror. Same `for` / `keep_firing_for` values as the real
+# business rules in miniapm-rules.yml, but driven by one gauge so the alert
+# lifecycle can be unit-tested without constructing histogram series.
+groups:
+  - name: p13-noise-lifecycle-tests
+    rules:
+      - alert: P13LifecycleProbe
+        expr: p13_lifecycle_probe > 0
+        for: 30s
+        keep_firing_for: 1m
+        labels:
+          severity: warning
+          policy: experiment
+        annotations:
+          summary: "P13 lifecycle probe"
