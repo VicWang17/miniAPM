@@ -33,8 +33,19 @@ services:
       - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
       - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
       - clickhouse-data:/var/lib/clickhouse
+  mysql:
+    image: mysql:9.4
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: miniapm
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
+      - mysql-data:/var/lib/mysql
 
 volumes:
   prometheus-data:
   grafana-data:
   clickhouse-data:
+  mysql-data:
