@@ -1,0 +1,43 @@
+{
+  "vhosts": [
+    {"name": "/"}
+  ],
+  "exchanges": [
+    {
+      "name": "miniapm.telemetry",
+      "type": "direct",
+      "durable": true,
+      "vhost": "/"
+    }
+  ],
+  "queues": [
+    {
+      "name": "miniapm.logs",
+      "durable": true,
+      "queue_type": "classic",
+      "vhost": "/"
+    },
+    {
+      "name": "miniapm.spans",
+      "durable": true,
+      "queue_type": "classic",
+      "vhost": "/"
+    }
+  ],
+  "bindings": [
+    {
+      "source": "miniapm.telemetry",
+      "destination": "miniapm.logs",
+      "destination_type": "queue",
+      "routing_key": "logs",
+      "vhost": "/"
+    },
+    {
+      "source": "miniapm.telemetry",
+      "destination": "miniapm.spans",
+      "destination_type": "queue",
+      "routing_key": "spans",
+      "vhost": "/"
+    }
+  ]
+}

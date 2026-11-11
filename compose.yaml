@@ -43,9 +43,20 @@ services:
     volumes:
       - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql-data:/var/lib/mysql
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbitmq_management load_definitions \"/etc/rabbitmq/definitions.json\""
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./deploy/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - rabbitmq-data:/var/lib/rabbitmq
 
 volumes:
   prometheus-data:
   grafana-data:
   clickhouse-data:
   mysql-data:
+  rabbitmq-data:
