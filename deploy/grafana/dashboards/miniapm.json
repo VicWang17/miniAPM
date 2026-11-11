@@ -1,0 +1,71 @@
+{
+  "uid": "miniapm-overview",
+  "title": "miniAPM Overview",
+  "timezone": "utc",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "time": {"from": "now-15m", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "label": "Service",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values(miniapm_requests_total, service)",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {"text": "order", "value": "order"}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "QPS",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum(rate(miniapm_requests_total{service=\"$service\"}[$__range]))", "legendFormat": "requests/s"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error ratio",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum(rate(miniapm_requests_total{service=\"$service\",status=\"error\"}[$__range])) / sum(rate(miniapm_requests_total{service=\"$service\"}[$__range]))", "legendFormat": "errors / requests"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "max": 1}, "overrides": []}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "P95 latency",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(miniapm_request_duration_seconds_bucket{service=\"$service\"}[$__range])))", "legendFormat": "P95"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "P99 latency",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.99, sum by (le) (rate(miniapm_request_duration_seconds_bucket{service=\"$service\"}[$__range])))", "legendFormat": "P99"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests in flight",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [{"refId": "A", "expr": "sum(miniapm_requests_in_flight{service=\"$service\"})", "legendFormat": "in flight"}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []}
+    }
+  ]
+}

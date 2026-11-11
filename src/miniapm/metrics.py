@@ -47,9 +47,9 @@ class MetricsPublisher:
         }
 
     async def request_started(self, plan: RequestPlan) -> None:
-        root = plan.spans[0]
-        labels = self._labels(root.service, root.instance, root.version, plan.route)
-        self.requests_in_flight.labels(**labels).inc()
+        for span in (plan.spans[0], plan.spans[2]):
+            labels = self._labels(span.service, span.instance, span.version, plan.route)
+            self.requests_in_flight.labels(**labels).inc()
 
     async def request_finished(self, events: RequestEvents) -> None:
         request = events.request
@@ -59,6 +59,15 @@ class MetricsPublisher:
         self.requests_in_flight.labels(**labels).dec()
         self.requests_total.labels(**labels, status=request.status).inc()
         self.request_duration.labels(**labels).observe(request.duration_seconds)
+
+        inventory = next(span for span in events.spans if span.kind == "server" and span.service == "inventory")
+        inventory_labels = self._labels(
+            inventory.service, inventory.instance, inventory.version, inventory.route
+        )
+        duration = (inventory.ended_at - inventory.started_at).total_seconds()
+        self.requests_in_flight.labels(**inventory_labels).dec()
+        self.requests_total.labels(**inventory_labels, status=inventory.status).inc()
+        self.request_duration.labels(**inventory_labels).observe(duration)
 
     async def publish_request(self, events: RequestEvents) -> None:
         return None
