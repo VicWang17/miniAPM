@@ -322,3 +322,228 @@ class MySQLContext:
             "error_reason": row[5],
             "report_json": json.loads(row[6]) if row[6] else None,
         }
+
+    # --- P12 knowledge cases -------------------------------------------------
+
+    CASE_COLUMNS = (
+        "id, dataset_id, service, alert_fingerprint, investigation_id, summary, "
+        "root_cause, resolution, result_evidence, keywords, status, reject_reason, "
+        "created_at, approved_at, hits, helped"
+    )
+
+    @staticmethod
+    def _case_row(row) -> dict:
+        return {
+            "id": row[0],
+            "dataset_id": row[1],
+            "service": row[2],
+            "alert_fingerprint": row[3],
+            "investigation_id": row[4],
+            "summary": row[5],
+            "root_cause": row[6],
+            "resolution": row[7],
+            "result_evidence": row[8],
+            "keywords": json.loads(row[9]) if row[9] else [],
+            "status": row[10],
+            "reject_reason": row[11],
+            "created_at": row[12].isoformat() if row[12] else None,
+            "approved_at": row[13].isoformat() if row[13] else None,
+            "hits": int(row[14] or 0),
+            "helped": int(row[15] or 0),
+        }
+
+    def upsert_case_candidate(
+        self,
+        case_id: str,
+        investigation_id: str,
+        dataset_id: str,
+        service: str,
+        alert_fingerprint: str | None,
+        summary: str,
+        root_cause: str,
+        resolution: str,
+        result_evidence: str | None,
+        keywords: list[str],
+    ) -> dict:
+        """Insert or refresh a pending candidate; refuses to overwrite a decided case."""
+        existing = self.case_by_investigation(investigation_id)
+        payload = (
+            summary,
+            root_cause,
+            resolution,
+            result_evidence,
+            json.dumps(keywords, ensure_ascii=False),
+        )
+        if existing is not None:
+            if existing["status"] != "pending":
+                raise ValueError(f"case for investigation {investigation_id} is already {existing['status']}")
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE cases SET summary=%s, root_cause=%s, resolution=%s,
+                        result_evidence=%s, keywords=%s
+                    WHERE investigation_id=%s
+                    """,
+                    (*payload, investigation_id),
+                )
+            self.connection.commit()
+            return self.case_by_investigation(investigation_id)
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO cases
+                    (id, dataset_id, service, alert_fingerprint, investigation_id,
+                     summary, root_cause, resolution, result_evidence, keywords, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                """,
+                (
+                    case_id,
+                    dataset_id,
+                    service,
+                    alert_fingerprint,
+                    investigation_id,
+                    *payload,
+                ),
+            )
+        self.connection.commit()
+        return self.case_by_investigation(investigation_id)
+
+    def case_by_id(self, case_id: str) -> dict | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {self.CASE_COLUMNS} FROM cases WHERE id=%s", (case_id,)
+            )
+            row = cursor.fetchone()
+        return None if row is None else self._case_row(row)
+
+    def alert_fingerprint(self, investigation_id: str) -> str | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT fingerprint FROM alerts WHERE investigation_id=%s LIMIT 1",
+                (investigation_id,),
+            )
+            row = cursor.fetchone()
+        return None if row is None else row[0]
+
+    def case_by_investigation(self, investigation_id: str) -> dict | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {self.CASE_COLUMNS} FROM cases WHERE investigation_id=%s",
+                (investigation_id,),
+            )
+            row = cursor.fetchone()
+        return None if row is None else self._case_row(row)
+
+    def approve_case(
+        self,
+        case_id: str,
+        result_evidence: str,
+        summary: str | None = None,
+        root_cause: str | None = None,
+        resolution: str | None = None,
+        keywords: list[str] | None = None,
+    ) -> dict:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE cases SET status='approved', result_evidence=%s, approved_at=%s,
+                    summary=COALESCE(%s, summary), root_cause=COALESCE(%s, root_cause),
+                    resolution=COALESCE(%s, resolution), keywords=COALESCE(%s, keywords),
+                    reject_reason=NULL
+                WHERE id=%s AND status IN ('pending', 'approved')
+                """,
+                (
+                    result_evidence,
+                    self._mysql_time(datetime.now(UTC)),
+                    summary,
+                    root_cause,
+                    resolution,
+                    json.dumps(keywords, ensure_ascii=False) if keywords is not None else None,
+                    case_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("case not found or already rejected")
+        self.connection.commit()
+        record = self.case_by_id(case_id)
+        if record is None:
+            raise LookupError("case not found after approval")
+        return record
+
+    def reject_case(self, case_id: str, reason: str) -> dict:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE cases SET status='rejected', reject_reason=%s
+                WHERE id=%s AND status='pending'
+                """,
+                (reason[:500], case_id),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("case not found or already decided")
+        self.connection.commit()
+        record = self.case_by_id(case_id)
+        if record is None:
+            raise LookupError("case not found after rejection")
+        return record
+
+    def search_cases(
+        self,
+        dataset_id: str,
+        service: str,
+        keywords: list[str] | None = None,
+        error_code: str | None = None,
+        route: str | None = None,
+        limit: int = 3,
+        scan_limit: int = 50,
+    ) -> list[dict]:
+        """Deterministic SQL filtering; ranking is done by the caller on the bounded set."""
+        clauses = ["dataset_id=%s", "service=%s", "status='approved'"]
+        params: list[object] = [dataset_id, service]
+        haystack = (
+            "CONCAT_WS(' ', summary, root_cause, resolution, "
+            "IFNULL(result_evidence, ''), CAST(keywords AS CHAR))"
+        )
+        if keywords:
+            keyword_clauses = []
+            for keyword in keywords[:5]:
+                keyword_clauses.append(f"{haystack} LIKE %s")
+                params.append(f"%{keyword}%")
+            clauses.append("(" + " OR ".join(keyword_clauses) + ")")
+        if error_code:
+            clauses.append(f"{haystack} LIKE %s")
+            params.append(f"%{error_code}%")
+        if route:
+            clauses.append(f"{haystack} LIKE %s")
+            params.append(f"%{route}%")
+        params.append(min(scan_limit, 200))
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {self.CASE_COLUMNS} FROM cases WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY hits DESC, created_at DESC LIMIT %s",
+                tuple(params),
+            )
+            rows = cursor.fetchall()
+        return [self._case_row(row) for row in rows]
+
+    def record_case_outcome(self, case_ids: list[str], helped: bool) -> int:
+        """Record that approved cases were retrieved; optionally that they helped."""
+        if not case_ids:
+            return 0
+        placeholders = ",".join(["%s"] * len(case_ids))
+        with self.connection.cursor() as cursor:
+            if helped:
+                cursor.execute(
+                    f"UPDATE cases SET hits=hits+1, helped=helped+1 WHERE id IN ({placeholders})",
+                    tuple(case_ids),
+                )
+            else:
+                cursor.execute(
+                    f"UPDATE cases SET hits=hits+1 WHERE id IN ({placeholders})",
+                    tuple(case_ids),
+                )
+            count = cursor.rowcount
+        self.connection.commit()
+        return count
+

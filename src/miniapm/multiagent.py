@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from miniapm.analysis import analyze_resource_changes
 from miniapm.backends import TelemetryBackend
+from miniapm.cases import create_knowledge_tools
 from miniapm.intake_backend import IntakeBackend
 from miniapm.investigation import (
     InvestigationBudget,
@@ -25,6 +26,7 @@ Maintain the investigation goal and competing explanations.
 Call telemetry_investigation for metrics, logs and traces, resource_change_investigation for deployments and resource evidence, intake_investigation for RabbitMQ backlog, or data_adaptation_investigation for explicit format/field identification and pending-data questions only when needed.
 For an explicit adaptation or pending-data task, call only data_adaptation_investigation; telemetry, deployments and resource evidence are irrelevant.
 Do not call all subagents by default and do not follow a fixed sequence. Do not invoke intake or adaptation subagents for unrelated business questions.
+Call query_historical_cases when similar past incidents could inform the current hypothesis. Recalled cases are references only: they never replace current evidence, never prove the current root cause, and never justify skipping data collection.
 Use returned evidence to decide follow-up queries or finish.
 Subagents return bounded summaries, not ground truth. State missing evidence and contradictions explicitly.
 Produce the final answer yourself with evidence-based conclusions and limitations.
@@ -163,6 +165,7 @@ def create_multiagent_investigation(
     shared_budget: SharedInvestigationBudget | None = None,
     intake_backend: IntakeBackend | None = None,
     adaptation_pipeline=None,
+    knowledge_dataset_id: str | None = None,
 ) -> CompiledStateGraph:
     shared_budget = shared_budget or SharedInvestigationBudget()
     deadline = shared_budget.deadline
@@ -231,6 +234,14 @@ def create_multiagent_investigation(
             system_prompt=ADAPTATION_PROMPT,
         )
         supervisor_tools.append(_as_tool("data_adaptation_investigation", adaptation_agent, deadline))
+    if (
+        knowledge_dataset_id
+        and deployment_context is not None
+        and hasattr(deployment_context, "search_cases")
+    ):
+        supervisor_tools.append(
+            create_knowledge_tools(deployment_context, knowledge_dataset_id, window)
+        )
     return create_investigation_agent(
         model,
         InvestigationBudget(),
@@ -264,6 +275,7 @@ async def arun_multiagent_investigation(
         resource_backend,
         shared_budget,
         adaptation_pipeline=adaptation_pipeline,
+        knowledge_dataset_id=dataset_id,
     )
     target = (
         f"{question}\nTarget service: {service}\n"

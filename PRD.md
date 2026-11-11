@@ -397,6 +397,32 @@ Burn Rate = 窗口错误比例 / 允许失败比例。例：5% / 1% = 5。阈值
 
 公开依据：[Google SRE 多窗口 SLO 告警](https://sre.google/workbook/alerting-on-slos/)、[Prometheus 告警规则](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)、[规则单元测试](https://prometheus.io/docs/prometheus/latest/configuration/unit_testing_rules/)。
 
+## 16. P12：历史案例知识库（结构化，暂不引入 RAG）
+
+### 16.1 目标与边界
+
+复现文档第 6 问“经验沉淀”的最小闭环：已完成的调查提炼成可复用历史案例，调查时按结构化+关键词召回辅助定位，并回写命中有效性。本版是结构化案例库，不是通用 RAG：不做文档切块、embedding、向量检索、通用文档库或语义重排；标准 redis:7.4.1 无向量模块，且当前案例规模不足以支撑向量检索收益。模型仅用于“report_json → 候选 case”提炼与“自然语言 → 检索条件”改写；召回、入库、去重均为确定性 SQL/关键词逻辑。
+
+案例来源为已完成的 investigations，report_json 是唯一事实源，cases 只存提炼摘要与引用，不复制报告。沉淀非全量：须满足“明确根因＋可复用解决方案＋恢复验证证据”；一次性、无结论、证据不足的调查不入库。人工确认是入库必经环节，模型只产出候选。
+
+### 16.2 数据模型与沉淀
+
+cases 字段：id、created_at、dataset_id、service、alert_fingerprint(可空)、investigation_id(外键)、summary、root_cause、resolution、result_evidence、keywords(JSON)。investigation_id 关联 investigations.id，跨实验以 dataset_id 隔离，同一 investigation 至多一条 case。result_evidence 必须带结论验证证据：已处置的记录恢复指标（如 order P95 2.0s→0.2s 及对比窗口），仅诊断的记录判别性证据（如 v1 错误率 80% vs v2 40% 且失败 trace 共有下游错误）；不得只写“已解决/已恢复”。诊断型案例的 resolution 记录实际动作或明确建议动作，不宣称已修复。候选由真实模型离线提炼，标注不确定项；不读 truth、不自动入库，受预算与超时约束，模型失败不影响原调查记录。
+
+### 16.3 召回与调查接入
+
+新增确定性工具 query_historical_cases：先按 service、error_code、route、关键词做 SQL 精确过滤，再在命中小集合内做关键词相似排序，返回有界 top-3（摘要、当时方案、结果、关联 investigation）。模型只负责自然语言→检索条件改写，不执行 SQL、不直接查库。工具接入现有调查 Agent，由模型按证据决定是否调用，结果计入全局预算；命中案例仅作根因候选或建议动作参考，不跳过取证、不直接当结论。
+
+### 16.4 反馈与评测
+
+命中后回写是否被采用、是否帮助解决（hits/helped），作为知识库价值证据。用留出的已知历史案例做 ground truth，测 recall@k 与命中有效性，注明分母、样本量与模型版本；小样本结论仅作趋势，不宣称通用检索质量。
+
+### 16.5 验收
+
+固定样本验收：沉淀筛选正例/反例判定正确；提炼候选字段齐全且证据可回溯；确认/拒绝路径与去重正确；召回对预期案例命中、对无匹配返回空；真实模型在一次调查中调用并引用历史案例；recall@k 有可复现数字。不做：向量检索、embedding、文档切块、自动入库、基于知识库的自动修复动作。
+
+公开依据：文档第 6 问字节“历史知识”与 Google SRE Postmortem；模型用途边界遵循 PRD 6.1 的调查约束与预算，不让模型执行任意 SQL。
+
 
 ## 17. P13：告警降噪与抽样审查（最小原型）
 
