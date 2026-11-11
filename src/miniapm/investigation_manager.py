@@ -1,7 +1,8 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
+from miniapm.alerts import AlertmanagerAlert, record_firing_alert
 from miniapm.investigation import arun_investigation
 from miniapm.models import ServiceName, TimeWindow
 from miniapm.mysql_context import MySQLContext
@@ -46,12 +47,38 @@ class InvestigationManager:
         self.context.create_investigation(
             investigation_id, dataset_id, question, service, window, status="queued"
         )
+        self._schedule(investigation_id, question, dataset_id, service, window, model)
+        return investigation_id
+
+    async def submit_alert(
+        self, alert: AlertmanagerAlert, default_dataset_id: UUID, model=None
+    ) -> dict:
+        record = record_firing_alert(self.context, alert, default_dataset_id)
+        if record["result"] == "duplicate":
+            return record
+        investigation_id = record["investigation_id"]
+        if self.pending_count >= self.max_queue + self.max_concurrent:
+            self.context.update_investigation_status(
+                investigation_id, "failed", "investigation capacity exhausted"
+            )
+            return {**record, "result": "capacity_exhausted"}
+        service = alert.labels.get("service", "order")
+        dataset_id = alert.labels.get("dataset_id", str(default_dataset_id))
+        summary = alert.annotations.get("summary") or alert.labels.get("alertname", "APM alert")
+        window = TimeWindow(
+            start=alert.starts_at, end=alert.starts_at + timedelta(minutes=15)
+        )
+        self._schedule(
+            investigation_id, f"Alert: {summary}", dataset_id, service, window, model
+        )
+        return record
+
+    def _schedule(self, investigation_id, question, dataset_id, service, window, model) -> None:
         task = asyncio.create_task(
             self._run(investigation_id, question, dataset_id, service, window, model)
         )
         self.tasks[investigation_id] = task
         task.add_done_callback(lambda _: self.tasks.pop(investigation_id, None))
-        return investigation_id
 
     async def _run(
         self,
