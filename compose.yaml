@@ -46,12 +46,15 @@ services:
   rabbitmq:
     image: rabbitmq:4.1-management
     environment:
+      RABBITMQ_DEFAULT_USER: miniapm
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbitmq_management load_definitions \"/etc/rabbitmq/definitions.json\""
     ports:
       - "5672:5672"
       - "15672:15672"
     volumes:
       - ./deploy/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - rabbitmq-data:/var/lib/rabbitmq
 
 volumes:
