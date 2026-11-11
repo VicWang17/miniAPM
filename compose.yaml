@@ -79,6 +79,29 @@ services:
     volumes:
       - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql-data:/var/lib/mysql
+  instrumented-order:
+    build:
+      context: .
+      dockerfile: deploy/instrumented/Dockerfile
+    environment:
+      SERVICE_NAME: order
+      INSTANCE: order-linux-1
+      VERSION: v1
+      DATASET_ID: 018f2f70-0000-7000-8000-000000000801
+      INVENTORY_URL: http://instrumented-inventory:8080
+    ports:
+      - "8080:8080"
+  instrumented-inventory:
+    build:
+      context: .
+      dockerfile: deploy/instrumented/Dockerfile
+    environment:
+      SERVICE_NAME: inventory
+      INSTANCE: inventory-linux-1
+      VERSION: v1
+      DATASET_ID: 018f2f70-0000-7000-8000-000000000801
+    ports:
+      - "8081:8080"
   redis:
     image: redis:7.4.1
     command: ["redis-server", "--save", "", "--appendonly", "no"]
