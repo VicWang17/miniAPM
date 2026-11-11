@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from langchain_core.messages import ToolMessage
 from pydantic import Field
 
+from miniapm.correlation import CorrelationResult
 from miniapm.models import ContractModel, ServiceName, TimeWindow
 
 EndReason = Literal[
@@ -52,6 +53,8 @@ class InvestigationReport(ContractModel):
     final_answer: str
     evidence: list[EvidenceRecord]
     subagent_runs: list[SubagentRun] = Field(default_factory=list)
+    correlation_group_id: UUID | None = None
+    correlation: CorrelationResult | None = None
     limitations: list[str]
     tool_calls: int
     supervisor_tool_calls: int = 0
@@ -136,6 +139,8 @@ def validate_report(report: InvestigationReport) -> None:
         raise ValueError("evidence_id values must be unique")
     if any(not item.call_id for item in report.evidence):
         raise ValueError("evidence call_id is required")
+    if (report.correlation_group_id is None) != (report.correlation is None):
+        raise ValueError("correlation result and group_id must be saved together")
     if report.supervisor_tool_calls > report.tool_calls:
         raise ValueError("global tool count is smaller than supervisor count")
     if report.tool_calls < len(report.evidence):

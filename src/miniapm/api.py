@@ -95,6 +95,10 @@ class BaselineCompareQuery(ContractModel):
     baseline_end_date: str
 
 
+class CandidateGroupRequest(ContractModel):
+    anchor_event_key: str
+
+
 class InvestigationRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     dataset_id: UUID
@@ -322,5 +326,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/v1/adaptation/replay")
     def replay(request: ReplayRequest) -> dict:
         return app.state.adaptation.replay(**request.model_dump())
+
+    @app.post("/api/v1/alert-groups", status_code=201)
+    def create_alert_group(request: CandidateGroupRequest) -> dict:
+        try:
+            group = app.state.adaptation.context.create_candidate_group(request.anchor_event_key)
+            return group.model_dump(mode="json")
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/v1/alert-groups/{group_id}")
+    def alert_group(group_id: str) -> dict:
+        group = app.state.adaptation.context.candidate_group(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="candidate group not found")
+        return group.model_dump(mode="json")
+
+    @app.post("/api/v1/alert-groups/{group_id}/investigations", status_code=202)
+    async def investigate_alert_group(group_id: str, http_request: Request) -> dict:
+        try:
+            investigation_id = await http_request.app.state.investigations.submit_group(group_id)
+            return {"investigation_id": investigation_id, "status": "queued"}
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except InvestigationQueueFull as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return app

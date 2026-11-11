@@ -264,9 +264,10 @@ async def arun_multiagent_investigation(
     resource_backend=None,
     dataset_id: str | None = None,
     adaptation_pipeline=None,
+    shared_budget: SharedInvestigationBudget | None = None,
 ) -> dict:
     window = TimeWindow(start=start, end=end)
-    shared_budget = SharedInvestigationBudget()
+    shared_budget = shared_budget or SharedInvestigationBudget()
     agent = create_multiagent_investigation(
         model,
         window,

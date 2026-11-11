@@ -3,7 +3,9 @@ from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from miniapm.alerts import AlertmanagerAlert, record_firing_alert
+from miniapm.correlation import parse_correlation_result, validate_correlation_result
 from miniapm.heterogeneous import HeterogeneousPipeline
+from miniapm.investigation import SharedInvestigationBudget
 from miniapm.multiagent import arun_multiagent_investigation
 from miniapm.models import ServiceName, TimeWindow
 from miniapm.mysql_context import MySQLContext
@@ -51,6 +53,34 @@ class InvestigationManager:
         self._schedule(investigation_id, question, dataset_id, service, window, model)
         return investigation_id
 
+    async def submit_group(self, group_id: str, model=None) -> str:
+        group = self.context.candidate_group(group_id)
+        if group is None:
+            raise LookupError("candidate group not found")
+        if self.pending_count >= self.max_queue + self.max_concurrent:
+            raise InvestigationQueueFull("investigation capacity exhausted")
+        investigation_id = str(uuid4())
+        anchor = next(member for member in group.members if member.relation == "anchor")
+        question = (
+            "Jointly investigate the candidate alert group; candidate grouping is not proof of shared root cause.\n"
+            f"Group snapshot: {group.model_dump_json()}\n"
+            "Return only JSON with members[{alert_id,judgment,evidence_refs,rationale}], "
+            "root_cause_candidates[{service,summary,evidence_refs,counter_evidence}], observed_impact, "
+            "rejected_explanations, missing_information. Every field must be an array; use [] when empty; "
+            "counter_evidence and observed_impact are arrays of strings, never scalar strings. "
+            "evidence_refs must contain only exact top-level subagent names actually called, such as telemetry_investigation; never tool names, dotted names, or services. "
+            "Use supported only with current evidence; use insufficient when traces or causal evidence are missing. "
+            "For HighLatency alerts, a shared trace with slow inventory spans inside slower order spans supports propagation without errors or a historical baseline. "
+            "That propagation does not prove inventory's internal root cause; keep that root unknown without direct evidence. "
+            "When evidence is insufficient, use root_cause_candidates=[]; do not create speculative or 'unknown' root entries. "
+            "Observed impact must be measured, not merely possible through topology."
+        )
+        self.context.create_investigation(investigation_id, str(group.dataset_id), question,
+            anchor.service, group.window, status="queued")
+        self.context.attach_group_investigation(group_id, investigation_id)
+        self._schedule(investigation_id, question, str(group.dataset_id), anchor.service, group.window, model, group)
+        return investigation_id
+
     async def submit_alert(
         self, alert: AlertmanagerAlert, default_dataset_id: UUID, model=None
     ) -> dict:
@@ -74,9 +104,9 @@ class InvestigationManager:
         )
         return record
 
-    def _schedule(self, investigation_id, question, dataset_id, service, window, model) -> None:
+    def _schedule(self, investigation_id, question, dataset_id, service, window, model, group=None) -> None:
         task = asyncio.create_task(
-            self._run(investigation_id, question, dataset_id, service, window, model)
+            self._run(investigation_id, question, dataset_id, service, window, model, group)
         )
         self.tasks[investigation_id] = task
         task.add_done_callback(lambda _: self.tasks.pop(investigation_id, None))
@@ -89,6 +119,7 @@ class InvestigationManager:
         service: ServiceName,
         window: TimeWindow,
         model,
+        group=None,
     ) -> None:
         backend = self.backend_factory(dataset_id)
         try:
@@ -104,10 +135,16 @@ class InvestigationManager:
                     deployment_context=self.context,
                     dataset_id=dataset_id,
                     adaptation_pipeline=HeterogeneousPipeline(self.context),
+                    shared_budget=SharedInvestigationBudget(max_tool_calls=20) if group else None,
                 )
-                report = result["report"].model_copy(
-                    update={"investigation_id": UUID(investigation_id)}
-                )
+                update = {"investigation_id": UUID(investigation_id)}
+                if group is not None:
+                    correlation = parse_correlation_result(result["final_answer"])
+                    available_refs = {run.agent_name for run in result["report"].subagent_runs}
+                    validate_correlation_result(correlation, group, available_refs)
+                    update.update(correlation_group_id=group.group_id, correlation=correlation)
+                report = result["report"].model_copy(update=update)
+                self.context.connection.ping(reconnect=True)
                 self.context.complete_investigation(report)
         except asyncio.CancelledError:
             self.context.update_investigation_status(
@@ -115,6 +152,7 @@ class InvestigationManager:
             )
             raise
         except Exception as exc:
+            self.context.connection.ping(reconnect=True)
             self.context.update_investigation_status(
                 investigation_id, "failed", f"{type(exc).__name__}: {exc}"[:1000]
             )

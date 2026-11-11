@@ -14,11 +14,11 @@ from miniapm.adapters import (
     adapt_prometheus,
 )
 from miniapm.models import LogEvent
-from miniapm.mysql_context import MySQLContext
+from miniapm.correlation import CorrelationContext
 from miniapm.rabbitmq_publisher import RabbitMQPublisher
 
 
-class HeterogeneousContext(MySQLContext):
+class HeterogeneousContext(CorrelationContext):
     def resolve_identity(self, dataset_id, environment, source_id, event_time) -> dict:
         with self.connection.cursor() as cursor:
             cursor.execute(
