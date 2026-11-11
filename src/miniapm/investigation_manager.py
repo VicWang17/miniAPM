@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 from miniapm.alerts import AlertmanagerAlert, record_firing_alert
-from miniapm.investigation import arun_investigation
+from miniapm.heterogeneous import HeterogeneousPipeline
+from miniapm.multiagent import arun_multiagent_investigation
 from miniapm.models import ServiceName, TimeWindow
 from miniapm.mysql_context import MySQLContext
 
@@ -93,7 +94,7 @@ class InvestigationManager:
         try:
             async with self.semaphore:
                 self.context.update_investigation_status(investigation_id, "running")
-                result = await arun_investigation(
+                result = await arun_multiagent_investigation(
                     question,
                     service,
                     window.start,
@@ -102,6 +103,7 @@ class InvestigationManager:
                     backend=backend,
                     deployment_context=self.context,
                     dataset_id=dataset_id,
+                    adaptation_pipeline=HeterogeneousPipeline(self.context),
                 )
                 report = result["report"].model_copy(
                     update={"investigation_id": UUID(investigation_id)}

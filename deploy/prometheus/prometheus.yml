@@ -25,6 +25,11 @@ scrape_configs:
       - targets:
           - instrumented-order:8080
           - instrumented-inventory:8080
+  - job_name: miniapm-adapted
+    honor_labels: true
+    metrics_path: /metrics/heterogeneous
+    static_configs:
+      - targets: [host.docker.internal:8000]
   - job_name: miniapm-rabbitmq
     static_configs:
       - targets: [rabbitmq:15692]

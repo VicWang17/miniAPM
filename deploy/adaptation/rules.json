@@ -1,0 +1,56 @@
+{
+  "rules": [
+    {
+      "version": "nginx-v1",
+      "source_format": "nginx",
+      "log_format": "$remote_addr - $remote_user [$time_local] \"$request\" $status rt=$request_time svc=$source_id",
+      "duration_field": "request_time",
+      "duration_unit": "seconds",
+      "route_from_request": true,
+      "time_unit": null,
+      "kind_map": {},
+      "metric_name": null,
+      "source_metric": null
+    },
+    {
+      "version": "otlp-v1",
+      "source_format": "otlp",
+      "log_format": null,
+      "duration_field": null,
+      "duration_unit": null,
+      "route_from_request": false,
+      "time_unit": "nanoseconds",
+      "kind_map": {
+        "1": "internal",
+        "2": "server",
+        "3": "client"
+      },
+      "metric_name": null,
+      "source_metric": null
+    },
+    {
+      "version": "prometheus-v1",
+      "source_format": "prometheus",
+      "log_format": null,
+      "duration_field": null,
+      "duration_unit": "milliseconds",
+      "route_from_request": false,
+      "time_unit": null,
+      "kind_map": {},
+      "metric_name": "miniapm_adapted_request_duration_seconds",
+      "source_metric": "http_request_duration_milliseconds"
+    },
+    {
+      "version": "nginx-v2",
+      "source_format": "nginx",
+      "log_format": "$remote_addr - $remote_user [$time_local] \"$request\" $status duration_ms=$duration_ms svc=$source_id",
+      "duration_field": "duration_ms",
+      "duration_unit": "milliseconds",
+      "route_from_request": true,
+      "time_unit": null,
+      "kind_map": {},
+      "metric_name": null,
+      "source_metric": null
+    }
+  ]
+}

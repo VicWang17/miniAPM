@@ -53,6 +53,9 @@ class ClickHouseBackend:
         version: str | None,
         error_code: str | None,
         limit: int,
+        environment: str | None = None,
+        instance: str | None = None,
+        source_kind: str | None = None,
     ) -> str:
         window = TimeWindow(start=start, end=end)
         filters = [
@@ -71,6 +74,10 @@ class ClickHouseBackend:
         if error_code:
             filters.append("error_code = {error_code:String}")
             parameters["error_code"] = error_code
+        for name, value in (("environment", environment), ("instance", instance), ("source_kind", source_kind)):
+            if value:
+                filters.append(f"{name} = {{{name}:String}}")
+                parameters[name] = value
         rows = self._query(
             "SELECT * FROM miniapm.logs_dedup WHERE " + " AND ".join(filters) + " ORDER BY event_time, trace_id LIMIT {limit:UInt32}",
             parameters,

@@ -22,8 +22,9 @@ from miniapm.tools import ResourceQueryInput
 
 SUPERVISOR_PROMPT = """You are the lead APM investigator.
 Maintain the investigation goal and competing explanations.
-Call telemetry_investigation for metrics, logs and traces, resource_change_investigation for deployments and resource evidence, or intake_investigation for RabbitMQ backlog, acknowledgements and ingestion delay only when needed.
-Do not call all subagents by default and do not follow a fixed sequence. Do not invoke intake_investigation for unrelated business questions unless platform lag is a relevant competing explanation.
+Call telemetry_investigation for metrics, logs and traces, resource_change_investigation for deployments and resource evidence, intake_investigation for RabbitMQ backlog, or data_adaptation_investigation for explicit format/field identification and pending-data questions only when needed.
+For an explicit adaptation or pending-data task, call only data_adaptation_investigation; telemetry, deployments and resource evidence are irrelevant.
+Do not call all subagents by default and do not follow a fixed sequence. Do not invoke intake or adaptation subagents for unrelated business questions.
 Use returned evidence to decide follow-up queries or finish.
 Subagents return bounded summaries, not ground truth. State missing evidence and contradictions explicitly.
 Produce the final answer yourself with evidence-based conclusions and limitations.
@@ -40,6 +41,14 @@ RESOURCE_CHANGE_PROMPT = """You are the resource and deployment investigation su
 Check deployments and available resource evidence for the exact dataset, service and time window.
 A deployment is only a clue, never proof of causality. Correlate timing and entity, and actively report contradictory evidence.
 If resource data is unavailable, state partial coverage instead of guessing. Return a concise summary of evidence and unresolved questions.
+"""
+
+ADAPTATION_PROMPT = """You are the heterogeneous data adaptation subagent.
+For a new nginx format, query_pending first, copy its raw sample exactly, then use propose_rule once with a complete AdaptationRule. No telemetry query or trial is needed before proposing.
+Inspect bounded pending summaries, raw samples, approved rules and identity evidence. Use trial conversion when useful.
+Explain field meanings or propose a versioned deterministic rule with scope, evidence, contradictions and missing information.
+Never read evaluation truth, invent identifiers, or claim a proposal is approved. You cannot publish rules or replay data.
+Return a bounded answer and explicitly say when evidence is insufficient.
 """
 
 INTAKE_PROMPT = """You are the telemetry intake investigation subagent.
@@ -108,6 +117,7 @@ def _subagent_runs(messages: list) -> list[SubagentRun]:
             "telemetry_investigation",
             "resource_change_investigation",
             "intake_investigation",
+            "data_adaptation_investigation",
         }:
             continue
         content = json.loads(message.content)
@@ -152,6 +162,7 @@ def create_multiagent_investigation(
     resource_backend=None,
     shared_budget: SharedInvestigationBudget | None = None,
     intake_backend: IntakeBackend | None = None,
+    adaptation_pipeline=None,
 ) -> CompiledStateGraph:
     shared_budget = shared_budget or SharedInvestigationBudget()
     deadline = shared_budget.deadline
@@ -202,17 +213,31 @@ def create_multiagent_investigation(
         tools_override=(query_intake,),
         system_prompt=INTAKE_PROMPT,
     )
+    supervisor_tools = [
+        _as_tool("telemetry_investigation", telemetry_agent, deadline),
+        _as_tool("resource_change_investigation", resource_agent, deadline),
+        _as_tool("intake_investigation", intake_agent, deadline),
+    ]
+    if adaptation_pipeline is not None:
+        from miniapm.adaptation_agent import create_adaptation_tools
+
+        adaptation_agent = create_investigation_agent(
+            model,
+            InvestigationBudget(max_tool_calls=4),
+            window,
+            backend,
+            shared_budget=shared_budget,
+            tools_override=create_adaptation_tools(adaptation_pipeline),
+            system_prompt=ADAPTATION_PROMPT,
+        )
+        supervisor_tools.append(_as_tool("data_adaptation_investigation", adaptation_agent, deadline))
     return create_investigation_agent(
         model,
         InvestigationBudget(),
         window,
         backend,
         shared_budget=shared_budget,
-        tools_override=(
-            _as_tool("telemetry_investigation", telemetry_agent, deadline),
-            _as_tool("resource_change_investigation", resource_agent, deadline),
-            _as_tool("intake_investigation", intake_agent, deadline),
-        ),
+        tools_override=tuple(supervisor_tools),
         system_prompt=SUPERVISOR_PROMPT,
     )
 
@@ -227,6 +252,7 @@ async def arun_multiagent_investigation(
     model: BaseChatModel | None = None,
     resource_backend=None,
     dataset_id: str | None = None,
+    adaptation_pipeline=None,
 ) -> dict:
     window = TimeWindow(start=start, end=end)
     shared_budget = SharedInvestigationBudget()
@@ -237,6 +263,7 @@ async def arun_multiagent_investigation(
         deployment_context,
         resource_backend,
         shared_budget,
+        adaptation_pipeline=adaptation_pipeline,
     )
     target = (
         f"{question}\nTarget service: {service}\n"
