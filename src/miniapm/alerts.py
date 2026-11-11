@@ -64,3 +64,14 @@ def record_firing_alert(context, alert: AlertmanagerAlert, default_dataset_id: U
         "status": "firing",
         "investigation_id": investigation_id,
     }
+
+
+def resolve_alert(context, alert: AlertmanagerAlert) -> dict:
+    event_key = alert_event_key(alert)
+    existing = context.alert(event_key)
+    if existing is None:
+        return {"event_key": event_key, "result": "not_found"}
+    if existing["status"] == "resolved":
+        return {"event_key": event_key, "result": "already_resolved", **existing}
+    resolved = context.resolve_alert(event_key, alert.ends_at)
+    return {"event_key": event_key, "result": "resolved", **resolved}

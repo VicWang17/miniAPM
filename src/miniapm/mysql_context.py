@@ -257,16 +257,36 @@ class MySQLContext:
             self.connection.rollback()
             raise
 
+    def resolve_alert(self, event_key: str, resolved_at: datetime) -> dict | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE alerts SET status='resolved', resolved_at=%s
+                WHERE event_key=%s AND status='firing'
+                """,
+                (self._mysql_time(resolved_at), event_key),
+            )
+        self.connection.commit()
+        return self.alert(event_key)
+
     def alert(self, event_key: str) -> dict | None:
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT event_key, status, investigation_id FROM alerts WHERE event_key=%s",
+                """
+                SELECT event_key, status, investigation_id, resolved_at
+                FROM alerts WHERE event_key=%s
+                """,
                 (event_key,),
             )
             row = cursor.fetchone()
         if row is None:
             return None
-        return {"event_key": row[0], "status": row[1], "investigation_id": row[2]}
+        return {
+            "event_key": row[0],
+            "status": row[1],
+            "investigation_id": row[2],
+            "resolved_at": row[3].isoformat() if row[3] else None,
+        }
 
     def explain_deployments(
         self, dataset_id: str, service: str, start: datetime, end: datetime
