@@ -249,6 +249,7 @@ async def arun_investigation(
     backend: TelemetryBackend | None = None,
     deployment_context=None,
     resource_backend=None,
+    dataset_id: str | None = None,
 ) -> dict:
     budget = budget or InvestigationBudget()
     window = TimeWindow(start=start, end=end)
@@ -260,6 +261,8 @@ async def arun_investigation(
         f"Target service: {service}\n"
         f"Time window: start={window.start.isoformat()}, end={window.end.isoformat()}"
     )
+    if dataset_id:
+        target += f"\nDataset ID: {dataset_id}"
     started = time.monotonic()
     result = await agent.ainvoke(
         {
@@ -296,6 +299,7 @@ def run_investigation(
     backend: TelemetryBackend | None = None,
     deployment_context=None,
     resource_backend=None,
+    dataset_id: str | None = None,
 ) -> dict:
     return asyncio.run(
         arun_investigation(
@@ -308,5 +312,6 @@ def run_investigation(
             backend,
             deployment_context,
             resource_backend,
+            dataset_id,
         )
     )

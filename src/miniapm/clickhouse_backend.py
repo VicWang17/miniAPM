@@ -267,11 +267,6 @@ class ClickHouseBackend:
         )
 
     def query_metrics(self, service: str, start: datetime, end: datetime) -> str:
-        return ToolResult[object](
-            status="error",
-            window=TimeWindow(start=start, end=end),
-            source_kind="simulated",
-            source_name="clickhouse",
-            data=None,
-            warnings=["metrics aggregation is not implemented yet"],
-        ).model_dump_json()
+        window = TimeWindow(start=start, end=end)
+        data = self.window_metrics(service, window.start, window.end)
+        return self._result(window, data if data["request_count"] else None)
