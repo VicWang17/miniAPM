@@ -1,14 +1,17 @@
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from miniapm.analysis import GroupDimension, analyze_groups, analyze_resource_changes, analyze_traces, compare_windows
 from miniapm.clickhouse_backend import ClickHouseBackend
 from miniapm.config import Settings
 from miniapm.models import ContractModel, ServiceContext, ServiceName, TimeWindow
+from miniapm.investigation_manager import InvestigationManager, InvestigationQueueFull
 from miniapm.mysql_context import MySQLContext
 from miniapm.prometheus_backend import PrometheusBackend
 
@@ -45,9 +48,33 @@ class WindowCompareQuery(ContractModel):
     previous_end: datetime
 
 
+class InvestigationRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    dataset_id: UUID
+    service: ServiceName
+    start: datetime
+    end: datetime
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    app = FastAPI(title=settings.app_name, version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        context = MySQLContext()
+        context.mark_interrupted()
+        manager = InvestigationManager(
+            context,
+            lambda dataset_id: ClickHouseBackend(dataset_id=dataset_id),
+        )
+        app.state.investigations = manager
+        try:
+            yield
+        finally:
+            await manager.close()
+            context.close()
+
+    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
     @app.get("/healthz")
     def health() -> dict[str, str]:
@@ -128,5 +155,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         finally:
             context.close()
+
+    @app.post("/api/v1/investigations", status_code=202)
+    async def create_investigation(
+        http_request: Request, request: InvestigationRequest
+    ) -> dict:
+        manager = http_request.app.state.investigations
+        try:
+            investigation_id = await manager.submit(
+                request.question,
+                str(request.dataset_id),
+                request.service,
+                request.start,
+                request.end,
+            )
+        except InvestigationQueueFull as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"investigation_id": investigation_id, "status": "queued"}
+
+    @app.get("/api/v1/investigations/{investigation_id}")
+    def investigation_status(http_request: Request, investigation_id: str) -> dict:
+        record = http_request.app.state.investigations.context.investigation(investigation_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="investigation not found")
+        return record
+
+    @app.get("/api/v1/investigations/{investigation_id}/report")
+    def investigation_report(http_request: Request, investigation_id: str) -> dict:
+        record = http_request.app.state.investigations.context.investigation(investigation_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="investigation not found")
+        if record["report_json"] is None:
+            raise HTTPException(status_code=409, detail="report is not ready")
+        return record["report_json"]
 
     return app

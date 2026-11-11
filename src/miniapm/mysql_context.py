@@ -129,13 +129,14 @@ class MySQLContext:
         question: str,
         service: str,
         window: TimeWindow,
+        status: str = "running",
     ) -> None:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
                 INSERT INTO investigations
                     (id, dataset_id, question, service, window_start, window_end, status)
-                VALUES (%s, %s, %s, %s, %s, %s, 'running')
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     investigation_id,
@@ -144,6 +145,7 @@ class MySQLContext:
                     service,
                     self._mysql_time(window.start),
                     self._mysql_time(window.end),
+                    status,
                 ),
             )
         self.connection.commit()
@@ -168,6 +170,43 @@ class MySQLContext:
             if cursor.rowcount != 1:
                 raise LookupError("investigation not found")
         self.connection.commit()
+
+    def update_investigation_status(
+        self, investigation_id: str, status: str, error_reason: str | None = None
+    ) -> None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE investigations
+                SET status=%s, error_reason=%s,
+                    finished_at=CASE WHEN %s IN ('failed', 'interrupted') THEN %s ELSE finished_at END
+                WHERE id=%s
+                """,
+                (
+                    status,
+                    error_reason,
+                    status,
+                    self._mysql_time(datetime.now(UTC)),
+                    investigation_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise LookupError("investigation not found")
+        self.connection.commit()
+
+    def mark_interrupted(self) -> int:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE investigations
+                SET status='interrupted', error_reason='application restarted', finished_at=%s
+                WHERE status IN ('queued', 'running')
+                """,
+                (self._mysql_time(datetime.now(UTC)),),
+            )
+            count = cursor.rowcount
+        self.connection.commit()
+        return count
 
     def investigation(self, investigation_id: str) -> dict | None:
         with self.connection.cursor() as cursor:
