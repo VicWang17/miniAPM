@@ -24,11 +24,13 @@ class RabbitMQConsumer:
         max_retries: int = 2,
         retry_delay_seconds: float = 1,
         metrics: IntakeMetrics | None = None,
+        close_flush_timeout_seconds: float = 5,
     ) -> None:
         self.writer = writer
         self.metrics = metrics
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
+        self.close_flush_timeout_seconds = close_flush_timeout_seconds
         self.connection = pika.BlockingConnection(pika.URLParameters(rabbitmq_url()))
         self.channel = self.connection.channel()
         self.channel.basic_qos(prefetch_count=prefetch)
@@ -104,5 +106,9 @@ class RabbitMQConsumer:
             raise
 
     async def close(self) -> None:
-        await self.writer.close()
-        self.connection.close()
+        try:
+            await asyncio.wait_for(
+                self.writer.close(), timeout=self.close_flush_timeout_seconds
+            )
+        finally:
+            self.connection.close()

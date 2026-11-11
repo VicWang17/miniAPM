@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 
 from prometheus_client import start_http_server
 
@@ -21,8 +22,13 @@ async def main() -> None:
     parser.add_argument("--retry-delay", type=float, default=1)
     parser.add_argument("--metrics-port", type=int, default=8767)
     parser.add_argument("--worker-id", default=f"consumer-{os.getpid()}")
+    parser.add_argument("--stop-flush-timeout", type=float, default=5)
     args = parser.parse_args()
 
+    stop_requested = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signal_name in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signal_name, stop_requested.set)
     metrics = IntakeMetrics(args.worker_id)
     if args.metrics_port:
         start_http_server(args.metrics_port, registry=metrics.registry)
@@ -39,12 +45,17 @@ async def main() -> None:
         max_retries=args.max_retries,
         retry_delay_seconds=args.retry_delay,
         metrics=metrics,
+        close_flush_timeout_seconds=args.stop_flush_timeout,
     ) as consumer:
-        while args.max_messages == 0 or processed < args.max_messages:
+        while not stop_requested.is_set() and (
+            args.max_messages == 0 or processed < args.max_messages
+        ):
             remaining = args.max_messages - processed if args.max_messages else args.batch_size
             batch_limit = min(args.batch_size, remaining)
             logs = await consumer.drain("miniapm.logs", batch_limit)
-            spans = await consumer.drain("miniapm.spans", batch_limit)
+            spans = 0 if stop_requested.is_set() else await consumer.drain(
+                "miniapm.spans", batch_limit
+            )
             processed += logs + spans
             if logs + spans == 0:
                 if args.max_messages:
