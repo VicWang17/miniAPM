@@ -1,8 +1,12 @@
 import argparse
 import asyncio
 import json
+import os
+
+from prometheus_client import start_http_server
 
 from miniapm.clickhouse_writer import BatchingClickHouseWriter
+from miniapm.intake_metrics import IntakeMetrics
 from miniapm.rabbitmq_consumer import RabbitMQConsumer
 
 
@@ -15,12 +19,18 @@ async def main() -> None:
     parser.add_argument("--max-messages", type=int, default=0)
     parser.add_argument("--max-retries", type=int, default=2)
     parser.add_argument("--retry-delay", type=float, default=1)
+    parser.add_argument("--metrics-port", type=int, default=8767)
+    parser.add_argument("--worker-id", default=f"consumer-{os.getpid()}")
     args = parser.parse_args()
 
+    metrics = IntakeMetrics(args.worker_id)
+    if args.metrics_port:
+        start_http_server(args.metrics_port, registry=metrics.registry)
     writer = BatchingClickHouseWriter(
         batch_size=args.batch_size,
         flush_interval_seconds=args.flush_interval,
         max_pending_events=args.max_pending,
+        metrics=metrics,
     )
     processed = 0
     async with RabbitMQConsumer(
@@ -28,6 +38,7 @@ async def main() -> None:
         prefetch=args.prefetch,
         max_retries=args.max_retries,
         retry_delay_seconds=args.retry_delay,
+        metrics=metrics,
     ) as consumer:
         while args.max_messages == 0 or processed < args.max_messages:
             remaining = args.max_messages - processed if args.max_messages else args.batch_size

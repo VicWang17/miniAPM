@@ -1,9 +1,11 @@
 import asyncio
 import json
+import time
 from typing import Protocol
 
 import httpx
 
+from miniapm.intake_metrics import IntakeMetrics
 from miniapm.models import LogEvent, SpanEvent
 
 
@@ -48,6 +50,7 @@ class BatchingClickHouseWriter:
         batch_size: int = 500,
         flush_interval_seconds: float = 1,
         max_pending_events: int = 2000,
+        metrics: IntakeMetrics | None = None,
     ) -> None:
         if batch_size < 1 or max_pending_events < batch_size:
             raise ValueError("invalid batch bounds")
@@ -55,6 +58,7 @@ class BatchingClickHouseWriter:
         self.batch_size = batch_size
         self.flush_interval_seconds = flush_interval_seconds
         self.max_pending_events = max_pending_events
+        self.metrics = metrics
         self.buffers = {"miniapm.logs": [], "miniapm.spans": []}
         self.lock = asyncio.Lock()
         self.flush_task = None
@@ -75,7 +79,12 @@ class BatchingClickHouseWriter:
         return sum(len(rows) for rows in self.buffers.values())
 
     async def _insert(self, table: str, rows: list[dict]) -> None:
-        await asyncio.to_thread(self.client.insert, table, rows)
+        started = time.monotonic()
+        try:
+            await asyncio.to_thread(self.client.insert, table, rows)
+        finally:
+            if self.metrics is not None:
+                self.metrics.observe_write(table, time.monotonic() - started)
 
     async def _flush_locked(self) -> None:
         pending = {table: rows for table, rows in self.buffers.items() if rows}

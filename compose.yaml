@@ -52,6 +52,7 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+      - "15692:15692"
     volumes:
       - ./deploy/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
       - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro

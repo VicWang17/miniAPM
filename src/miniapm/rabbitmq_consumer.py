@@ -7,6 +7,7 @@ from urllib.parse import quote
 import pika
 
 from miniapm.clickhouse_writer import BatchingClickHouseWriter
+from miniapm.intake_metrics import IntakeMetrics
 from miniapm.models import LogEvent, SpanEvent
 
 
@@ -22,8 +23,10 @@ class RabbitMQConsumer:
         prefetch: int = 20,
         max_retries: int = 2,
         retry_delay_seconds: float = 1,
+        metrics: IntakeMetrics | None = None,
     ) -> None:
         self.writer = writer
+        self.metrics = metrics
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
         self.connection = pika.BlockingConnection(pika.URLParameters(rabbitmq_url()))
@@ -74,11 +77,15 @@ class RabbitMQConsumer:
                 event = json.loads(body)
                 pending.append((method.delivery_tag, event))
                 if queue == "miniapm.logs":
-                    await self.writer.add_log(LogEvent.model_validate(event))
+                    validated = LogEvent.model_validate(event)
+                    await self.writer.add_log(validated)
                 elif queue == "miniapm.spans":
-                    await self.writer.add_span(SpanEvent.model_validate(event))
+                    validated = SpanEvent.model_validate(event)
+                    await self.writer.add_span(validated)
                 else:
                     raise ValueError("unsupported queue")
+                if self.metrics is not None:
+                    self.metrics.observe_received(queue, validated.event_time)
                 processed += 1
                 if processed >= max_messages:
                     break
@@ -86,6 +93,8 @@ class RabbitMQConsumer:
             await self.writer.flush()
             for delivery_tag, _ in pending:
                 self.channel.basic_ack(delivery_tag=delivery_tag)
+            if self.metrics is not None and pending:
+                self.metrics.observe_acknowledged(queue, len(pending))
             return processed
         except Exception:
             self.channel.cancel()
